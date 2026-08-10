@@ -36,7 +36,8 @@ const IMG = {};
 //   <id>_atk.png 공격 포즈 (스윙 중 스왑)
 const SUMMON_IDS=["seo","wolf","crane","turtle","relic2"];
 const IMG_LIST=["player","player_res","seo","wolf","crane","turtle","relic2",
- "grunt","wraith","ram","mini","boss","gem"];
+ "grunt","wraith","ram","mini","boss","gem",
+ "title_bg","card","panel"];   // UI 일러스트 (선택적 — 없으면 현행 절차 생성 유지)
 SUMMON_IDS.forEach(id=>IMG_LIST.push(id+"_2",id+"_3",id+"_atk"));
 IMG_LIST.forEach(n=>{
   const im = new Image();
@@ -82,6 +83,26 @@ function spr(n,x,y,scale=1,flip=false,target){
   if(flip) ctx.scale(-1,1);
   ctx.drawImage(im,-w/2,-h/2,w,h);
   ctx.restore(); return true;
+}
+// --- UI 일러스트 (title_bg / card / panel) ---
+// 픽셀 스프라이트와 달리 매끄럽게 스케일한다. 스무딩은 save/restore 안에서만 켜므로
+// 전역 imageSmoothingEnabled=false(스프라이트용 NEAREST)는 자동으로 원복된다.
+function uiCover(n,x,y,w,h){
+  const im=IMG[n]; if(!im||!im.width) return false;
+  const k=Math.max(w/im.width,h/im.height);        // cover-fit (비율 유지, 넘치는 쪽은 잘라냄)
+  const dw=im.width*k,dh=im.height*k;
+  ctx.save();
+  ctx.beginPath();ctx.rect(x,y,w,h);ctx.clip();
+  ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
+  ctx.drawImage(im,x+(w-dw)/2,y+(h-dh)/2,dw,dh);
+  ctx.restore();
+  return true;
+}
+// 패널 배경 — 이미지가 있을 때만 그리고, 위에 같은 톤의 막을 덮어 텍스트 대비를 유지한다.
+function drawPanel(x,y,w,h,dim){
+  if(!uiCover("panel",x,y,w,h)) return false;      // 없으면 현행(전면 오버레이만) 유지
+  ctx.fillStyle=dim;ctx.fillRect(x,y,w,h);
+  return true;
 }
 function goFull(){
   if(document.fullscreenElement) return;
@@ -1145,8 +1166,10 @@ function drawLevelup(){
   ctx.font="12px serif";ctx.fillText("(1·2·3 키 또는 클릭)",W/2,143);
   G.offers.forEach((id,i)=>{
     const x=150+i*230,y=170,u=UNITS[id],have=G.roster[id]||0;
-    ctx.fillStyle=PAPER;ctx.fillRect(x,y,210,220);
-    ctx.strokeStyle=INK;ctx.strokeRect(x,y,210,220);
+    if(!uiCover("card",x,y,210,220)){              // 카드 일러스트가 있으면 테두리 stroke 생략
+      ctx.fillStyle=PAPER;ctx.fillRect(x,y,210,220);
+      ctx.strokeStyle=INK;ctx.strokeRect(x,y,210,220);
+    }
     ctx.fillStyle=INK;ctx.font="bold 19px serif";
     ctx.fillText(u.name,x+105,y+44);
     ctx.font="12px serif";ctx.fillStyle=GREY;
@@ -1171,6 +1194,7 @@ function wrapText(txt,cx,y,maxW,lh){
 }
 function drawPause(){          // 일시정지 — 조작 안내 재표시
   ctx.fillStyle="rgba(242,237,227,0.92)";ctx.fillRect(0,0,W,H);
+  drawPanel(124,62,712,474,"rgba(242,237,227,0.62)");   // 3:2 — panel.png 비율에 맞춰 크롭 최소화
   ctx.fillStyle=INK;ctx.textAlign="center";
   ctx.font="bold 26px serif";ctx.fillText("책을 잠시 덮는다",W/2,132);
   ctx.fillStyle=GREY;ctx.font="12px serif";
@@ -1224,6 +1248,7 @@ function runSummary(y,col,dim){
 }
 function drawOver(){
   ctx.fillStyle="rgba(28,26,23,0.82)";ctx.fillRect(0,0,W,H);
+  drawPanel(168,80,624,416,"rgba(28,26,23,0.70)");    // 어두운 오버레이 유지 (텍스트 대비)
   ctx.fillStyle=PAPER;ctx.textAlign="center";
   ctx.font="bold 30px serif";ctx.fillText("책이 덮였다",W/2,H/2-96);
   ctx.font="15px serif";ctx.fillStyle=FAINT;
@@ -1236,6 +1261,7 @@ function drawOver(){
 }
 function drawWin(){
   ctx.fillStyle="rgba(242,237,227,0.93)";ctx.fillRect(0,0,W,H);
+  drawPanel(140,10,700,466,"rgba(242,237,227,0.72)");
   ctx.fillStyle=INK;ctx.textAlign="center";
   ctx.font="bold 27px serif";ctx.fillText("제일장(第一章) — 복원 완료",W/2,68);
   const hits=G.rank.hitTaken;
@@ -1249,11 +1275,25 @@ function drawWin(){
   ctx.fillStyle=GREY;ctx.font="12px serif";
   ctx.fillText(`${regressions+1}번째 열람에서 닿았다`,W/2,378);
   ctx.fillStyle=FAINT;ctx.font="12px serif";
-  ctx.fillText(IS_TOUCH?"탭 — 다른 사관(史觀)으로 다시 읽는다":"R 키 또는 클릭 — 다른 사관(史觀)으로 다시 읽는다",W/2,412);
+  ctx.fillText(IS_TOUCH?"탭 — 다른 사관(史觀)으로 다시 읽는다":"R 키 또는 클릭 — 다른 사관(史觀)으로 다시 읽는다",W/2,404);
 }
 function drawTitle(){
   ctx.textAlign="center";
   const cx=W/2;
+  // --- 배경 일러스트 (있으면) — cover-fit + 상단 중앙 한지색 비네트로 타이포 대비 확보 ---
+  if(uiCover("title_bg",0,0,W,H)){
+    const g=ctx.createRadialGradient(cx,180,40,cx,180,540);   // 제자·부제 대비
+    g.addColorStop(0,"rgba(242,237,227,0.40)");
+    g.addColorStop(0.55,"rgba(242,237,227,0.30)");
+    g.addColorStop(1,"rgba(242,237,227,0)");
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    const g2=ctx.createLinearGradient(0,330,0,H);             // 하단 안내문 대비
+    g2.addColorStop(0,"rgba(242,237,227,0)");
+    g2.addColorStop(0.32,"rgba(242,237,227,0.34)");
+    g2.addColorStop(0.86,"rgba(242,237,227,0.34)");
+    g2.addColorStop(1,"rgba(242,237,227,0.10)");
+    ctx.fillStyle=g2;ctx.fillRect(0,330,W,H-330);
+  }
   // --- 제자(題字): 세로 붓글씨 ---
   ctx.save();
   ctx.globalAlpha=0.035;ctx.fillStyle=INK;             // 먹 번짐 바탕
