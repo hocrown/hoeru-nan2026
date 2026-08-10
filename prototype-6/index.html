@@ -24,7 +24,8 @@ const W = 960, H = 540;
 // --- 모바일 대응: 고해상도 렌더 + 터치 환경 감지 ---
 const DPR = Math.min(window.devicePixelRatio||1, 2);
 cv.width = W*DPR; cv.height = H*DPR; ctx.scale(DPR, DPR);
-const IS_TOUCH = matchMedia("(pointer:coarse)").matches;
+// URL에 #touch 를 붙이면 데스크톱에서도 모바일 UI를 강제 (모바일 레이아웃 검수용)
+const IS_TOUCH = matchMedia("(pointer:coarse)").matches || location.hash === "#touch";
 // --- 이미지 에셋 레이어 (assets/<이름>.png 존재 시 자동 사용, 없으면 절차 생성 폴백) ---
 ctx.imageSmoothingEnabled = false; // 픽셀 아트 선명 렌더
 const IMG = {};
@@ -888,29 +889,49 @@ function draw(){
       ctx.beginPath();ctx.arc(touchMove.ox+dx/l*kl,touchMove.oy+dy/l*kl,12,0,TAU);ctx.fill();
       ctx.globalAlpha=1;
     }
+    // 경공 — 먹빛 원 + 갈매기 아이콘
     const b=DASH_BTN,ready=G.p.dashCd<=0;
-    ctx.globalAlpha=0.55;
-    ctx.fillStyle=ready?"#33404e":"#c9c3b8";
+    ctx.save();ctx.textAlign="center";
+    ctx.globalAlpha=ready?0.82:0.45;
+    ctx.fillStyle=ready?"#2b3642":"#b9b2a5";
     ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,TAU);ctx.fill();
-    if(!ready){ctx.strokeStyle="#33404e";ctx.lineWidth=3;
-      ctx.beginPath();ctx.arc(b.x,b.y,b.r-2,-Math.PI/2,-Math.PI/2+TAU*(1-G.p.dashCd/1.5));ctx.stroke();ctx.lineWidth=1;}
-    ctx.fillStyle=PAPER;ctx.font="bold 14px serif";ctx.textAlign="center";
-    ctx.fillText("경공",b.x,b.y+5);
-    ctx.globalAlpha=1;
-    // 공명 버튼 (좌하단)
+    ctx.globalAlpha=ready?0.9:0.5;ctx.strokeStyle=INK;ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,TAU);ctx.stroke();
+    if(!ready){ctx.strokeStyle=PAPER;ctx.lineWidth=3;
+      ctx.beginPath();ctx.arc(b.x,b.y,b.r-4,-Math.PI/2,-Math.PI/2+TAU*(1-G.p.dashCd/1.5));ctx.stroke();}
+    ctx.globalAlpha=ready?1:0.6;
+    ctx.strokeStyle=PAPER;ctx.lineWidth=3;ctx.lineCap="round";
+    for(let i=0;i<2;i++){const ox=b.x-7+i*10;
+      ctx.beginPath();ctx.moveTo(ox-4,b.y-12);ctx.lineTo(ox+4,b.y-4);ctx.lineTo(ox-4,b.y+4);ctx.stroke();}
+    ctx.lineCap="butt";ctx.lineWidth=1;
+    ctx.fillStyle=PAPER;ctx.font="bold 11px serif";
+    ctx.fillText("경공",b.x,b.y+21);
+    ctx.restore();
+    // 공명 — 청 원 + 종 아이콘
     const rb=RES_BTN,rready=G.res>=100&&G.resT<=0;
-    ctx.globalAlpha=rready?0.75:0.35;
-    ctx.fillStyle=rready?BLUE:"#c9c3b8";
+    ctx.save();ctx.textAlign="center";
+    ctx.globalAlpha=rready?0.85:0.4;
+    ctx.fillStyle=rready?BLUE:"#b9b2a5";
     ctx.beginPath();ctx.arc(rb.x,rb.y,rb.r,0,TAU);ctx.fill();
+    ctx.globalAlpha=rready?0.95:0.55;ctx.strokeStyle=INK;ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(rb.x,rb.y,rb.r,0,TAU);ctx.stroke();
     if(!rready&&G.resT<=0){ctx.strokeStyle=BLUE;ctx.lineWidth=3;
-      ctx.beginPath();ctx.arc(rb.x,rb.y,rb.r-2,-Math.PI/2,-Math.PI/2+TAU*G.res/100);ctx.stroke();ctx.lineWidth=1;}
-    ctx.fillStyle=rready?PAPER:GREY;ctx.font="bold 13px serif";
-    ctx.fillText("공명",rb.x,rb.y+5);
-    ctx.globalAlpha=1;
+      ctx.beginPath();ctx.arc(rb.x,rb.y,rb.r-4,-Math.PI/2,-Math.PI/2+TAU*G.res/100);ctx.stroke();}
+    ctx.globalAlpha=1;ctx.lineWidth=1;
+    ctx.fillStyle=rready?PAPER:"#6b655c";
+    ctx.beginPath();ctx.moveTo(rb.x-8,rb.y+2);
+    ctx.quadraticCurveTo(rb.x-8,rb.y-10,rb.x,rb.y-12);
+    ctx.quadraticCurveTo(rb.x+8,rb.y-10,rb.x+8,rb.y+2);
+    ctx.closePath();ctx.fill();
+    ctx.fillRect(rb.x-10,rb.y+2,20,2.5);
+    ctx.beginPath();ctx.arc(rb.x,rb.y+7,2,0,TAU);ctx.fill();
+    ctx.font="bold 10px serif";
+    ctx.fillText("공명",rb.x,rb.y+21);
+    ctx.restore();
   }
   drawHUD();
   if(scene==="levelup")drawLevelup();
-  if(scene==="pause")overlayText("멈춤 — 탭 또는 P 키로 계속");
+  if(scene==="pause")drawPause();
   if(scene==="over")drawOver();
   if(scene==="win")drawWin();
   ctx.restore();
@@ -993,6 +1014,30 @@ function wrapText(txt,cx,y,maxW,lh){
     if(ctx.measureText(line+w).width>maxW){ctx.fillText(line,cx,y);line=w+" ";y+=lh;}
     else line+=w+" ";}
   ctx.fillText(line.trim(),cx,y);
+}
+function drawPause(){          // 일시정지 — 조작 안내 재표시
+  ctx.fillStyle="rgba(242,237,227,0.92)";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle=INK;ctx.textAlign="center";
+  ctx.font="bold 26px serif";ctx.fillText("책을 잠시 덮는다",W/2,132);
+  ctx.fillStyle=GREY;ctx.font="12px serif";
+  ctx.fillText("— 조작 —",W/2,160);
+  const rows=IS_TOUCH
+    ?[["드래그","이동 (아무 곳이나)"],
+      ["우하단 [경공]","회피 — 순간 무적"],
+      ["그 위 [공명]","빙의 버스트 (게이지 100)"],
+      ["두 번째 손가락 탭","경공"],
+      ["우상단 🔊","음소거"]]
+    :[["WASD / 방향키","이동"],
+      ["Space","경공 — 회피, 저스트 시 공명 충전"],
+      ["E","공명 — 빙의 버스트"],
+      ["1 · 2 · 3","호명(레벨업) 선택"],
+      ["P / Esc","멈춤"],
+      ["M","음소거"]];
+  rows.forEach((r,i)=>{const y=196+i*30;
+    ctx.textAlign="right";ctx.fillStyle=INK;ctx.font="14px serif";ctx.fillText(r[0],W/2-14,y);
+    ctx.textAlign="left";ctx.fillStyle=GREY;ctx.font="13px serif";ctx.fillText(r[1],W/2+14,y);});
+  ctx.textAlign="center";ctx.fillStyle=INK;ctx.font="14px serif";
+  ctx.fillText(IS_TOUCH?"화면을 탭해 계속":"P 또는 Esc — 계속",W/2,H-46);
 }
 function overlayText(t){
   ctx.fillStyle="rgba(242,237,227,0.85)";ctx.fillRect(0,0,W,H);
