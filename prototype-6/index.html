@@ -29,8 +29,16 @@ const IS_TOUCH = matchMedia("(pointer:coarse)").matches || location.hash === "#t
 // --- 이미지 에셋 레이어 (assets/<이름>.png 존재 시 자동 사용, 없으면 절차 생성 폴백) ---
 ctx.imageSmoothingEnabled = false; // 픽셀 아트 선명 렌더
 const IMG = {};
-["player","player_res","seo","wolf","crane","turtle","relic2",
- "grunt","wraith","ram","mini","boss","gem"].forEach(n=>{
+// 소환수 스프라이트 변형 규약 — 파일이 있으면 자동 사용, 없으면 기본형/절차 폴백:
+//   <id>.png    기본 (삼류~일류)
+//   <id>_2.png  티어 4~5 (절정·초절정)
+//   <id>_3.png  티어 6   (화경)
+//   <id>_atk.png 공격 포즈 (스윙 중 스왑)
+const SUMMON_IDS=["seo","wolf","crane","turtle","relic2"];
+const IMG_LIST=["player","player_res","seo","wolf","crane","turtle","relic2",
+ "grunt","wraith","ram","mini","boss","gem"];
+SUMMON_IDS.forEach(id=>IMG_LIST.push(id+"_2",id+"_3",id+"_atk"));
+IMG_LIST.forEach(n=>{
   const im = new Image();
   im.onload = ()=>{ IMG[n]=im; };
   im.onerror = ()=>{};           // 없으면 폴백 유지
@@ -40,11 +48,30 @@ const IMG = {};
 // 스펙대로(파일 픽셀 = 표시 크기) 넣으면 축소 없이 1:1 렌더된다.
 const SPR_SIZE={player:[30,46],player_res:[30,46],seo:[26,42],wolf:[26,20],crane:[28,20],
   turtle:[24,22],relic2:[10,26],grunt:[24,24],wraith:[22,26],ram:[38,32],
-  mini:[52,56],boss:[64,68],gem:[10,10]};
+  mini:[52,56],boss:[64,68],gem:[10,10],
+  seo_2:[28,44],seo_3:[30,46],seo_atk:[34,42]};
+// 표에 없는 변형(<id>_2 등)은 기본형 크기에 경지별 여유를 준 값을 상한으로 삼는다.
+const VAR_GROW={_2:1.15,_3:1.3,_atk:1.35};
+function sprSize(n){
+  if(SPR_SIZE[n])return SPR_SIZE[n];
+  const m=n.match(/^(.+)(_2|_3|_atk)$/);
+  if(m&&SPR_SIZE[m[1]]){
+    const k=VAR_GROW[m[2]],b=SPR_SIZE[m[1]];
+    return [Math.round(b[0]*k),Math.round(b[1]*k)];
+  }
+  return null;
+}
+// 경지에 따른 스프라이트 변형 선택 (파일 없으면 기본형)
+function tierVariant(id){
+  const t=(G&&G.roster[id])||1;
+  if(t>=6&&IMG[id+"_3"])return id+"_3";
+  if(t>=4&&IMG[id+"_2"])return id+"_2";
+  return id;
+}
 function spr(n,x,y,scale=1,flip=false,target){
   const im = IMG[n]; if(!im||!im.width) return false;
   let w = im.width, h = im.height;
-  const tg = target||SPR_SIZE[n];
+  const tg = target||sprSize(n);
   if(tg){                                    // 과대 이미지 방어 — 목표 박스에 맞춰 축소 (확대는 안 함)
     const k = Math.min(tg[0]/w, tg[1]/h);
     if(k < 1){ w*=k; h*=k; }
@@ -143,9 +170,15 @@ const SFX={
   kill(){ if(!sfxGate("kill",55))return;                     // 처치 — 먹 퍼지는 낮은 팝
     tone({f:190,f2:52,type:"sine",dur:0.22,vol:0.12});
     nz({type:"lowpass",fc:900,fc2:180,dur:0.26,vol:0.075}); },
-  summon(){                                                  // 승급/등장
+  summon(){                                                  // 신규 계약 등장
     [0,0.09,0.18].forEach((d,i)=>tone({f:294*Math.pow(1.26,i),type:"triangle",dur:0.42,vol:0.09,delay:d}));
     nz({type:"bandpass",fc:1800,fc2:700,q:2,dur:0.4,vol:0.05}); },
+  promote(big){                                              // 승급 — 상행 아르페지오
+    const base=big?261.6:220;
+    [0,0.08,0.16,0.26].forEach((d,i)=>tone({f:base*Math.pow(1.26,i),type:"triangle",
+      dur:0.5,vol:big?0.1:0.08,delay:d}));
+    if(big){ tone({f:base*2,type:"sine",dur:1.3,vol:0.08,delay:0.32,atk:0.02});
+      nz({type:"bandpass",fc:2600,fc2:600,q:2,dur:0.6,vol:0.055}); } },
   pick(){                                                    // 선택 확정 — 목판 딱
     tone({f:1180,f2:900,type:"square",dur:0.05,vol:0.05});
     tone({f:590,type:"sine",dur:0.16,vol:0.08,delay:0.02}); },
@@ -343,14 +376,28 @@ function tagsRecalc(){
 function synStep(tag){return SYN[tag].steps.filter(s=>G.tags[tag]>=s).length;}
 function addUnit(id){
   if(UNITS[id].consume){G.p.hp=Math.min(G.p.hpMax,G.p.hp+35);return;}
-  SFX.summon();
-  if(G.roster[id]){G.roster[id]=Math.min(G.roster[id]+1,TIERS.length);}
-  else{G.roster[id]=1;
-    if(id!=="relic1")G.summons.push(makeSummon(id));}
+  const had=G.roster[id]||0;
+  if(had){                        // --- 승급 (경지 상승) ---
+    const nt=Math.min(had+1,TIERS.length);
+    G.roster[id]=nt;
+    const s=G.summons.find(q=>q.id===id);
+    const big=(nt===4||nt===6);   // 스프라이트 변형이 바뀌는 경지 — 연출을 더 크게
+    G.fx.push({type:"promote",x:s?s.x:G.p.x,y:s?s.y:G.p.y,t:0,tier:nt,big,s:s||null});
+    SFX.promote(big);
+    if(big)G.dimT=Math.max(G.dimT,0.3);
+  }else{                          // --- 신규 계약 (새 이름이 왔다) ---
+    G.roster[id]=1;
+    let s=null;
+    if(id!=="relic1")G.summons.push(s=makeSummon(id));
+    else s=G.summons.find(q=>q.id==="seo")||null;   // 검령은 유서린에 깃든다
+    G.fx.push({type:"summonpop",x:s?s.x:G.p.x,y:s?s.y:G.p.y,t:0});
+    G.fx.push({type:"nametag",s,x:G.p.x,y:G.p.y,id,t:0});
+    SFX.summon();
+  }
   tagsRecalc();
 }
 function makeSummon(id){
-  const base={id,x:G.p.x,y:G.p.y,ang:rnd(0,TAU),cd:0,hitCd:0};
+  const base={id,x:G.p.x,y:G.p.y,ang:rnd(0,TAU),cd:0,hitCd:0,sw:0,swTg:null,face:{x:1,y:0}};
   return base;
 }
 function tierOf(id){return G.roster[id]||1;}
@@ -571,14 +618,14 @@ function update(dt){
   let orbitN=G.summons.filter(s=>s.id!=="relic2"&&!(s.id==="seo"&&G.resT>0)).length,oi=0;
   for(const s of G.summons){
     const u=UNITS[s.id];
-    if(s.id==="seo"&&G.resT>0)continue; // 공명 중 — 그녀는 도윤과 함께 있다
+    if(s.id==="seo"&&G.resT>0){s.sw=0;continue;} // 공명 중 — 그녀는 도윤과 함께 있다
+    if(s.sw>0){s.sw-=dt;if(s.sw<=0){s.sw=0;summonFire(s);}}   // 스윙 진행/종료
     if(s.id==="relic2"){ // 자율 검
       s.cd-=dt;
       const tg=nearestEnemy(s.x,s.y,520);
       if(tg){const dx=tg.x-s.x,dy=tg.y-s.y,l=Math.hypot(dx,dy)||1;
         s.x+=dx/l*300*dt;s.y+=dy/l*300*dt;
-        if(l<26&&s.cd<=0){s.cd=1.1;hitEnemy(tg,14*mul("relic2"),"relic2");
-          if(synStep("sword")>=1)wave(s.x,s.y,dx/l,dy/l,9*mul("relic2"),"relic2");}}
+        if(l<26&&s.cd<=0&&s.sw<=0){s.cd=1.1;swingStart(s,tg,dx,dy,l);}}
       else{s.x+=(p.x+40-s.x)*2*dt;s.y+=(p.y-40-s.y)*2*dt;}
       continue;
     }
@@ -590,27 +637,23 @@ function update(dt){
     if(s.id==="seo"){
       const rate=0.9/(G.roster.relic1?1.12:1);
       const tg=nearestEnemy(s.x,s.y,120);
-      if(tg&&s.cd<=0){s.cd=rate;s.combo=((s.combo||0)+1)%3;
-        const dmg=(s.combo===2?20:12)*mul("seo");
-        hitEnemy(tg,dmg,"seo");
-        G.fx.push({type:"slash",x:tg.x,y:tg.y,t:0});
-        if(s.combo===2||synStep("sword")>=1){
-          const dx=tg.x-s.x,dy=tg.y-s.y,l=Math.hypot(dx,dy)||1;
-          wave(s.x,s.y,dx/l,dy/l,12*mul("seo"),"seo");}}
+      if(tg&&s.cd<=0&&s.sw<=0){s.cd=rate;
+        const dx=tg.x-s.x,dy=tg.y-s.y,l=Math.hypot(dx,dy)||1;swingStart(s,tg,dx,dy,l);}
     }else if(s.id==="wolf"){
       const tg=nearestEnemy(p.x,p.y,340);
       if(tg){const dx=tg.x-s.x,dy=tg.y-s.y,l=Math.hypot(dx,dy)||1;
         s.x+=dx/l*250*dt;s.y+=dy/l*250*dt;
-        if(l<20&&s.cd<=0){s.cd=0.7;hitEnemy(tg,8*mul("wolf"),"wolf");}}
+        if(l<20&&s.cd<=0&&s.sw<=0){s.cd=0.7;swingStart(s,tg,dx,dy,l);}}
     }else if(s.id==="crane"){
       const tg=nearestEnemy(s.x,s.y,420);
-      if(tg&&s.cd<=0){s.cd=1.4;
-        const dx=tg.x-s.x,dy=tg.y-s.y,l=Math.hypot(dx,dy)||1;
-        G.shots.push({x:s.x,y:s.y,vx:dx/l*330,vy:dy/l*330,dmg:10*mul("crane"),src:"crane",life:1.6,pierce:0});}
+      if(tg&&s.cd<=0&&s.sw<=0){s.cd=1.4;
+        const dx=tg.x-s.x,dy=tg.y-s.y,l=Math.hypot(dx,dy)||1;swingStart(s,tg,dx,dy,l);}
     }else if(s.id==="turtle"){
+      // 석귀는 몸통 박치기 — 접촉 즉시 판정, 스윙은 시각 효과로만
       for(const e of G.enemies){
         if(dist2(s,e)<(e.r+14)**2&&s.cd<=0){s.cd=0.8;hitEnemy(e,7*mul("turtle"),"turtle");
-          const dx=e.x-s.x,dy=e.y-s.y,l=Math.hypot(dx,dy)||1;e.x+=dx/l*26;e.y+=dy/l*26;}
+          const dx=e.x-s.x,dy=e.y-s.y,l=Math.hypot(dx,dy)||1;e.x+=dx/l*26;e.y+=dy/l*26;
+          s.sw=SWING;s.swTg=null;s.face={x:dx/l,y:dy/l};}
       }
     }
   }
@@ -690,12 +733,40 @@ function update(dt){
   }
   // --- fx ---
   for(const f of G.fx)f.t+=dt;
-  G.fx=G.fx.filter(f=>f.t<(f.type==="ilseom"?0.5:f.type==="synflash"?1.4:f.type==="resmsg"?2.2:f.type==="finflash"?0.6:f.type==="ghost"?0.3:0.4));
+  G.fx=G.fx.filter(f=>f.t<(FX_LIFE[f.type]||0.4));
   for(const q of G.parts){q.t+=dt;q.x+=q.vx*dt;q.y+=q.vy*dt;q.vx*=0.92;q.vy*=0.92;}
   G.parts=G.parts.filter(q=>q.t<q.life);
   for(const d of G.dmgTx)d.t+=dt;
   G.dmgTx=G.dmgTx.filter(d=>d.t<0.6);
   G.shake=Math.max(0,G.shake-dt*30);
+}
+// fx 종류별 수명(초) — 없으면 0.4
+const FX_LIFE={ilseom:0.5,synflash:1.4,resmsg:2.2,finflash:0.6,ghost:0.3,
+  promote:0.9,summonpop:0.55,nametag:1.2,elitewarn:1.6};
+// 공격 스윙 — 이 시간만큼 선행해서 포즈를 잡고, 종료 프레임에 검기/투사체가 나간다.
+// 쿨다운은 스윙 시작 시점에 리셋되므로 정상 상태의 공격 주기는 변하지 않는다.
+const SWING=0.14;
+function swingStart(s,tg,dx,dy,l){ s.sw=SWING; s.swTg=tg; s.face={x:dx/l,y:dy/l}; }
+// 스윙 종료 프레임 — 실제 타격/발사
+function summonFire(s){
+  const range=s.id==="crane"?420:s.id==="relic2"?60:140;
+  const tg=(s.swTg&&!s.swTg.dead)?s.swTg:nearestEnemy(s.x,s.y,range);
+  s.swTg=null;
+  if(!tg)return;                              // 대상이 사라졌으면 헛스윙
+  const dx=tg.x-s.x,dy=tg.y-s.y,l=Math.hypot(dx,dy)||1;
+  if(s.id==="seo"){
+    s.combo=((s.combo||0)+1)%3;
+    hitEnemy(tg,(s.combo===2?20:12)*mul("seo"),"seo");
+    G.fx.push({type:"slash",x:tg.x,y:tg.y,t:0});
+    if(s.combo===2||synStep("sword")>=1)wave(s.x,s.y,dx/l,dy/l,12*mul("seo"),"seo");
+  }else if(s.id==="wolf"){
+    if(l<34)hitEnemy(tg,8*mul("wolf"),"wolf");
+  }else if(s.id==="crane"){
+    G.shots.push({x:s.x,y:s.y,vx:dx/l*330,vy:dy/l*330,dmg:10*mul("crane"),src:"crane",life:1.6,pierce:0});
+  }else if(s.id==="relic2"){
+    if(l<44){hitEnemy(tg,14*mul("relic2"),"relic2");
+      if(synStep("sword")>=1)wave(s.x,s.y,dx/l,dy/l,9*mul("relic2"),"relic2");}
+  }
 }
 function wave(x,y,dx,dy,dmg,src){
   G.shots.push({x,y,vx:dx*380,vy:dy*380,dmg,src,life:0.9,pierce:99,wave:true});
@@ -784,15 +855,43 @@ function draw(){
     else{ctx.strokeStyle="#7a8a94";ctx.beginPath();ctx.moveTo(s.x,s.y);
       ctx.lineTo(s.x-s.vx*0.03,s.y-s.vy*0.03);ctx.stroke();}
   }
-  // 소환수
+  // 소환수 — 경지 변형 + 스윙 포즈/런지
   for(const s of G.summons){
     if(s.id==="seo"&&G.resT>0)continue;
     const tgn=nearestEnemy(s.x,s.y,400);
-    if(spr(s.id,s.x,s.y,1,tgn?tgn.x>s.x:false)){
-      if(s.id==="seo"&&G.roster.relic1){ctx.strokeStyle="#8a9aa8";ctx.beginPath();
-        ctx.moveTo(s.x-11,s.y-12);ctx.lineTo(s.x-11,s.y-2);ctx.stroke();}
-      continue;
-    }
+    const sw=s.sw>0?1-clamp(s.sw/SWING,0,1):-1;        // 0→1 스윙 진행, -1 = 평상
+    const fd=(s.sw>0&&s.face)?s.face
+      :(tgn?{x:Math.sign(tgn.x-s.x)||1,y:0}:(s.face||{x:1,y:0}));
+    const lung=sw>=0?Math.sin(sw*Math.PI)*4:0;         // 대상 방향 전진 런지 4px
+    ctx.save();ctx.translate(fd.x*lung,fd.y*lung);
+    drawSummonBody(s,fd,sw);
+    ctx.restore();
+    if(sw>=0&&!IMG[s.id+"_atk"])drawSwingArc(s,fd,sw); // _atk 없는 유닛의 무기 호 폴백
+  }
+  drawFieldTail(p);
+  drawHUD();
+  if(scene==="levelup")drawLevelup();
+  if(scene==="pause")drawPause();
+  if(scene==="over")drawOver();
+  if(scene==="win")drawWin();
+  ctx.restore();
+}
+function drawSwingArc(s,fd,sw){
+  const a=Math.atan2(fd.y,fd.x),sweep=(sw-0.5)*1.9;
+  ctx.save();
+  ctx.strokeStyle=s.id==="crane"?"#7a8a94":s.id==="wolf"?"#4a5a66":s.id==="turtle"?"#5d6155":BLUE;
+  ctx.globalAlpha=Math.max(0,0.75*(1-Math.abs(sw-0.5)*1.2));
+  ctx.lineWidth=2.5;ctx.lineCap="round";
+  ctx.beginPath();ctx.arc(s.x,s.y,15,a+sweep-0.45,a+sweep+0.45);ctx.stroke();
+  ctx.restore();
+}
+function drawSummonBody(s,fd,sw){
+  const flip=fd.x<0;
+  const mark=()=>{ if(s.id==="seo"&&G.roster.relic1){ctx.strokeStyle="#8a9aa8";
+    ctx.beginPath();ctx.moveTo(s.x-11,s.y-12);ctx.lineTo(s.x-11,s.y-2);ctx.stroke();} };
+  if(sw>=0&&IMG[s.id+"_atk"]&&spr(s.id+"_atk",s.x,s.y,1,flip)){mark();return;}
+  if(spr(tierVariant(s.id),s.x,s.y,1,flip)){mark();return;}
+  {
     if(s.id==="seo"){drawFigure(s.x,s.y,NAVY,0.9);
       ctx.strokeStyle=BLUE;ctx.beginPath();ctx.moveTo(s.x+6,s.y-8);ctx.lineTo(s.x+6,s.y+10);ctx.stroke();
       if(G.roster.relic1){ctx.strokeStyle="#8a9aa8";ctx.beginPath();
@@ -813,6 +912,9 @@ function draw(){
       ctx.beginPath();ctx.moveTo(0,-10);ctx.lineTo(0,10);ctx.stroke();
       ctx.lineWidth=1;ctx.restore();}
   }
+}
+// 소환수 이후 — 플레이어·파티클·fx·피해 숫자·모바일 UI
+function drawFieldTail(p){
   // 플레이어 도윤 (식별 링 + 공명 시 빙의 형상)
   ctx.strokeStyle=GOLD;ctx.globalAlpha=0.7;ctx.setLineDash([4,4]);
   ctx.beginPath();ctx.ellipse(p.x,p.y+13,13,5,0,0,TAU);ctx.stroke();
@@ -881,6 +983,42 @@ function draw(){
       ctx.beginPath();ctx.arc(f.x,f.y,12+f.t*70,0,TAU);ctx.stroke();ctx.lineWidth=1;ctx.globalAlpha=1;}
     else if(f.type==="finflash"){ctx.strokeStyle=BLUE;ctx.globalAlpha=1-f.t/0.6;ctx.lineWidth=4;
       ctx.beginPath();ctx.arc(f.x,f.y,f.t*260,0,TAU);ctx.stroke();ctx.lineWidth=1;ctx.globalAlpha=1;}
+    else if(f.type==="promote"){ // 승급 — 먹 번짐 펄스 + 경지명
+      const pr=f.t/0.9,fade=1-pr,R=f.big?70:44;
+      const x=f.s?f.s.x:f.x,y=f.s?f.s.y:f.y;
+      ctx.globalAlpha=0.22*fade;
+      inkBlob(x,y,14+pr*R*0.5,pr*6,f.big?GOLD:INK);
+      ctx.globalAlpha=0.8*fade;ctx.strokeStyle=f.big?GOLD:BLUE;ctx.lineWidth=f.big?3:2;
+      ctx.beginPath();ctx.arc(x,y,10+pr*R,0,TAU);ctx.stroke();
+      if(f.big){ctx.globalAlpha=0.45*fade;
+        ctx.beginPath();ctx.arc(x,y,10+pr*R*0.55,0,TAU);ctx.stroke();}
+      ctx.lineWidth=1;
+      ctx.globalAlpha=Math.min(1,fade*2.2);
+      ctx.fillStyle=f.big?"#7a5c14":INK;ctx.textAlign="center";
+      ctx.font=(f.big?"bold 19px":"bold 15px")+" serif";
+      ctx.fillText(TIERS[f.tier-1],x,y-26-pr*16);
+      ctx.globalAlpha=1;}
+    else if(f.type==="summonpop"){ // 신규 계약 — 먹 번짐 스폰
+      const pr=f.t/0.55,fade=1-pr;
+      ctx.globalAlpha=0.3*fade;inkBlob(f.x,f.y,10+pr*34,pr*7,INK);
+      ctx.globalAlpha=0.85*fade;ctx.strokeStyle=INK;ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(f.x,f.y,8+pr*40,0,TAU);ctx.stroke();
+      ctx.lineWidth=1;ctx.globalAlpha=1;}
+    else if(f.type==="nametag"){ // 새 개체 이름표
+      const x=f.s?f.s.x:f.x,y=f.s?f.s.y:f.y,u=UNITS[f.s?f.s.id:f.id];
+      ctx.globalAlpha=Math.max(0,Math.min(1,Math.min(f.t*6,(1.2-f.t)*4)));
+      ctx.font="bold 12px serif";ctx.textAlign="center";
+      const tw=ctx.measureText(u.name).width+16;
+      ctx.fillStyle=PAPER;ctx.fillRect(x-tw/2,y-42,tw,18);
+      ctx.strokeStyle=INK;ctx.strokeRect(x-tw/2,y-42,tw,18);
+      ctx.fillStyle=INK;ctx.fillText(u.name,x,y-29);
+      ctx.beginPath();ctx.moveTo(x-4,y-24);ctx.lineTo(x,y-19);ctx.lineTo(x+4,y-24);
+      ctx.fillStyle=PAPER;ctx.fill();ctx.stroke();
+      ctx.globalAlpha=1;}
+    else if(f.type==="elitewarn"){
+      ctx.globalAlpha=Math.min(1,(1.6-f.t)*1.4);
+      ctx.fillStyle=RED;ctx.font="bold 17px serif";ctx.textAlign="center";
+      ctx.fillText("돌귀 무리가 밀려온다",W/2,152);ctx.globalAlpha=1;}
     else if(f.type==="resmsg"){ctx.globalAlpha=Math.min(1,2.2-f.t);
       ctx.fillStyle=INK;ctx.font="bold 17px serif";ctx.textAlign="center";
       ctx.fillText("공명(共鳴) — 그녀의 검을, 직접 쥔다",W/2,120);ctx.globalAlpha=1;}
@@ -943,12 +1081,6 @@ function draw(){
     ctx.fillText("공명",rb.x,rb.y+21);
     ctx.restore();
   }
-  drawHUD();
-  if(scene==="levelup")drawLevelup();
-  if(scene==="pause")drawPause();
-  if(scene==="over")drawOver();
-  if(scene==="win")drawWin();
-  ctx.restore();
 }
 function drawHUD(){
   const p=G.p;
