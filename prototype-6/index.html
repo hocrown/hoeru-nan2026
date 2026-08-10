@@ -37,7 +37,7 @@ const IMG = {};
 const SUMMON_IDS=["seo","wolf","crane","turtle","relic2"];
 const IMG_LIST=["player","player_res","seo","wolf","crane","turtle","relic2",
  "grunt","wraith","ram","mini","boss","gem",
- "title_bg","card","panel"];   // UI 일러스트 (선택적 — 없으면 현행 절차 생성 유지)
+ "title_bg","card","panel","title_logo"];   // UI 일러스트 (선택적 — 없으면 현행 절차 생성 유지)
 SUMMON_IDS.forEach(id=>IMG_LIST.push(id+"_2",id+"_3",id+"_atk"));
 IMG_LIST.forEach(n=>{
   const im = new Image();
@@ -95,6 +95,17 @@ function uiCover(n,x,y,w,h){
   ctx.beginPath();ctx.rect(x,y,w,h);ctx.clip();
   ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
   ctx.drawImage(im,x+(w-dw)/2,y+(h-dh)/2,dw,dh);
+  ctx.restore();
+  return true;
+}
+// 비율 유지 배치 (높이 기준) — 로고처럼 잘리면 안 되는 이미지용. shadow는 알파 매트를 따라간다.
+function uiImage(n,cx,cy,h,shadow){
+  const im=IMG[n]; if(!im||!im.width) return false;
+  const k=h/im.height,w=im.width*k;
+  ctx.save();
+  ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
+  if(shadow){ctx.shadowColor="rgba(28,26,23,0.30)";ctx.shadowBlur=9;ctx.shadowOffsetY=3;}
+  ctx.drawImage(im,cx-w/2,cy-h/2,w,h);
   ctx.restore();
   return true;
 }
@@ -1317,66 +1328,79 @@ function drawTitle(){
   const cx=W/2;
   // --- 배경 일러스트 (있으면) — cover-fit + 상단 중앙 한지색 비네트로 타이포 대비 확보 ---
   if(uiCover("title_bg",0,0,W,H)){
-    const g=ctx.createRadialGradient(cx,180,40,cx,180,540);   // 제자·부제 대비
-    g.addColorStop(0,"rgba(242,237,227,0.40)");
-    g.addColorStop(0.55,"rgba(242,237,227,0.30)");
-    g.addColorStop(1,"rgba(242,237,227,0)");
-    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
-    const g2=ctx.createLinearGradient(0,330,0,H);             // 하단 안내문 대비
+    const g2=ctx.createLinearGradient(0,418,0,H);             // 하단 진입/조작 안내 대비
     g2.addColorStop(0,"rgba(242,237,227,0)");
-    g2.addColorStop(0.32,"rgba(242,237,227,0.34)");
-    g2.addColorStop(0.86,"rgba(242,237,227,0.34)");
-    g2.addColorStop(1,"rgba(242,237,227,0.10)");
-    ctx.fillStyle=g2;ctx.fillRect(0,330,W,H-330);
+    g2.addColorStop(0.28,"rgba(242,237,227,0.56)");
+    g2.addColorStop(1,"rgba(242,237,227,0.56)");
+    ctx.fillStyle=g2;ctx.fillRect(0,418,W,H-418);
+    const g3=ctx.createRadialGradient(788,372,30,788,372,270); // 우측 서사 블록 대비
+    g3.addColorStop(0,"rgba(242,237,227,0.50)");
+    g3.addColorStop(0.62,"rgba(242,237,227,0.38)");
+    g3.addColorStop(1,"rgba(242,237,227,0)");
+    ctx.fillStyle=g3;ctx.fillRect(W-540,100,540,H-100);
   }
-  // --- 제자(題字): 세로 붓글씨 ---
-  ctx.save();
-  ctx.globalAlpha=0.035;ctx.fillStyle=INK;             // 먹 번짐 바탕
-  ctx.beginPath();ctx.ellipse(cx,120,60,110,0,0,TAU);ctx.fill();
-  ctx.globalAlpha=0.4;ctx.strokeStyle=GREY;ctx.lineWidth=1;  // 세로 괘선 (책장)
-  ctx.beginPath();ctx.moveTo(cx+58,34);ctx.lineTo(cx+58,186);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(cx-58,34);ctx.lineTo(cx-58,186);ctx.stroke();
-  ctx.globalAlpha=1;
-  ["回","樓"].forEach((ch,i)=>{
-    const y=86+i*80;
-    ctx.globalAlpha=0.18;ctx.fillStyle=INK;ctx.font="bold 80px serif";
-    ctx.fillText(ch,cx+3,y+3.5);                        // 번진 잔상 = 붓 자국
-    ctx.globalAlpha=1;ctx.font="bold 74px serif";
-    ctx.fillText(ch,cx,y);
-  });
-  ctx.restore();
-  ctx.fillStyle=INK;ctx.font="18px serif";
-  ctx.fillText("회루 — 지워진 이름을 되살려라",cx,204);
-  ctx.fillStyle=GREY;ctx.font="13px serif";
-  ctx.fillText("무림은 실재했고, 역사에서 지워졌다.",cx,244);
-  ctx.fillText("유일한 독자였던 당신이 그 기록 속으로 떨어졌다.",cx,266);
-  ctx.fillText("지워진 인물들을 기억으로 되살려 — 군단을 이끌어라.",cx,288);
-  // 회귀 카운터 — 서사 문구
-  if(regressions>0){
-    ctx.fillStyle=GOLD;ctx.font="13px serif";
-    ctx.fillText(`${regressions+1}번째 열람 — 같은 책, 다른 사관(史觀)`,cx,322);
+  // --- 제자(題字) — 배경 유서린(좌하)·누각(우측)을 피해 좌상~중앙 여백에 배치 ---
+  const LX=316,LY=176,LH=320;
+  const glow=ctx.createRadialGradient(LX,LY,20,LX,LY,LH*0.62);   // 한지 발광 — 산수와 분리
+  glow.addColorStop(0,"rgba(242,237,227,0.25)");
+  glow.addColorStop(0.6,"rgba(242,237,227,0.16)");
+  glow.addColorStop(1,"rgba(242,237,227,0)");
+  ctx.fillStyle=glow;ctx.fillRect(LX-LH,LY-LH,LH*2,LH*2);
+  if(!uiImage("title_logo",LX,LY,LH,true)){                      // 폴백: 기존 세로 붓글씨
+    ctx.save();
+    ctx.globalAlpha=0.4;ctx.strokeStyle=GREY;ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(LX+62,LY-140);ctx.lineTo(LX+62,LY+120);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(LX-62,LY-140);ctx.lineTo(LX-62,LY+120);ctx.stroke();
+    ctx.globalAlpha=1;
+    ["回","樓"].forEach((ch,i)=>{
+      const y=LY-42+i*88;
+      ctx.globalAlpha=0.18;ctx.fillStyle=INK;ctx.font="bold 88px serif";
+      ctx.fillText(ch,LX+3,y+3.5);                               // 번진 잔상 = 붓 자국
+      ctx.globalAlpha=1;ctx.font="bold 82px serif";
+      ctx.fillText(ch,LX,y);
+    });
+    ctx.restore();
   }
-  // 조작 안내 (플랫폼 자동)
-  ctx.fillStyle=INK;ctx.font="14px serif";
-  if(IS_TOUCH){
-    ctx.fillText("아무 곳이나 드래그 — 이동 · 우하단 [경공] 회피 · 그 위 [공명] 빙의",cx,362);
-    ctx.fillStyle=GREY;ctx.font="12px serif";
-    ctx.fillText("두 번째 손가락 탭도 경공 · 소환수는 자동 전투 · 가로 화면 전용",cx,386);
-  }else{
-    ctx.fillText("WASD / 방향키 — 이동 · Space — 경공(회피) · E — 공명(빙의 버스트)",cx,362);
-    ctx.fillStyle=GREY;ctx.font="12px serif";
-    ctx.fillText("소환수는 자동 전투 · 레벨업 시 1·2·3 으로 호명 · P 멈춤 · M 음소거",cx,386);
+  // 낙관 — 로고 우하단 근접 (서예 낙관 문법)
+  ctx.save();ctx.translate(LX+118,LY+112);ctx.rotate(0.05);
+  ctx.fillStyle="#a63a2a";ctx.fillRect(0,0,48,48);
+  ctx.fillStyle=PAPER;ctx.font="bold 17px serif";ctx.textAlign="center";
+  ctx.fillText("回",24,21);ctx.fillText("樓",24,41);ctx.restore();
+  // --- 우측 하단: 부제 + 서사 (우측 정렬) ---
+  const RX=934;
+  ctx.textAlign="right";ctx.fillStyle=INK;
+  ctx.font="18px serif";
+  ctx.fillText("회루 — 지워진 이름을 되살려라",RX,330);
+  ctx.font="13px serif";
+  ctx.fillText("무림은 실재했고, 역사에서 지워졌다.",RX,362);
+  ctx.fillText("유일한 독자였던 당신이 그 기록 속으로 떨어졌다.",RX,384);
+  ctx.fillText("지워진 인물들을 기억으로 되살려 — 군단을 이끌어라.",RX,406);
+  if(regressions>0){                                   // 회귀 카운터 — 서사 문구
+    ctx.globalAlpha=0.75;
+    ctx.fillText(`${regressions+1}번째 열람 — 같은 책, 다른 사관(史觀)`,RX,432);
+    ctx.globalAlpha=1;
   }
+  // --- 하단 중앙: 진입 유도 + 조작 안내 ---
+  ctx.textAlign="center";
+  ctx.globalAlpha=0.75+0.20*Math.sin(performance.now()/430);   // 먹 농도 펄스 0.55~0.95
   ctx.fillStyle=INK;ctx.font="bold 18px serif";
-  ctx.fillText(((performance.now()/600|0)%2===0)
-    ?(IS_TOUCH?"— 화면을 탭해 책을 펼친다 —":"— 책을 펼친다 (Enter) —"):"",cx,440);
-  ctx.fillStyle=FAINT;ctx.font="11px serif";
-  ctx.fillText("NAN 2026 해커톤 데모 · 6분 런 · 3분 중간보스 · 5분 30초 최종보스",cx,500);
-  // 인장
-  ctx.save();ctx.translate(W-96,88);ctx.rotate(0.05);
-  ctx.fillStyle="#a63a2a";ctx.fillRect(0,0,52,52);
-  ctx.fillStyle=PAPER;ctx.font="bold 18px serif";
-  ctx.fillText("回",26,22);ctx.fillText("樓",26,44);ctx.restore();
+  ctx.fillText(IS_TOUCH?"— 화면을 탭해 책을 펼친다 —":"— 책을 펼친다 (Enter) —",cx,458);
+  ctx.globalAlpha=1;
+  ctx.fillStyle=GREY;                                  // GREY는 조작 안내에만
+  if(IS_TOUCH){
+    ctx.font="13px serif";
+    ctx.fillText("아무 곳이나 드래그 — 이동 · 우하단 [경공] 회피 · 그 위 [공명] 빙의",cx,490);
+    ctx.font="11px serif";
+    ctx.fillText("두 번째 손가락 탭도 경공 · 소환수는 자동 전투 · 가로 화면 전용",cx,509);
+  }else{
+    ctx.font="13px serif";
+    ctx.fillText("WASD / 방향키 — 이동 · Space — 경공(회피) · E — 공명(빙의 버스트)",cx,490);
+    ctx.font="11px serif";
+    ctx.fillText("소환수는 자동 전투 · 레벨업 시 1·2·3 으로 호명 · P 멈춤 · M 음소거",cx,509);
+  }
+  ctx.fillStyle=INK;ctx.globalAlpha=0.62;ctx.font="11px serif";
+  ctx.fillText("NAN 2026 해커톤 데모 · 6분 런 · 3분 중간보스 · 5분 30초 최종보스",cx,530);
+  ctx.globalAlpha=1;
 }
 requestAnimationFrame(frame);
 </script>
