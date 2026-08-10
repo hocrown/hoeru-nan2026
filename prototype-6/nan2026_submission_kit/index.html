@@ -24,7 +24,8 @@ const W = 960, H = 540;
 // --- 모바일 대응: 고해상도 렌더 + 터치 환경 감지 ---
 const DPR = Math.min(window.devicePixelRatio||1, 2);
 cv.width = W*DPR; cv.height = H*DPR; ctx.scale(DPR, DPR);
-const IS_TOUCH = matchMedia("(pointer:coarse)").matches;
+// URL에 #touch 를 붙이면 데스크톱에서도 모바일 UI를 강제 (모바일 레이아웃 검수용)
+const IS_TOUCH = matchMedia("(pointer:coarse)").matches || location.hash === "#touch";
 // --- 이미지 에셋 레이어 (assets/<이름>.png 존재 시 자동 사용, 없으면 절차 생성 폴백) ---
 ctx.imageSmoothingEnabled = false; // 픽셀 아트 선명 렌더
 const IMG = {};
@@ -35,10 +36,22 @@ const IMG = {};
   im.onerror = ()=>{};           // 없으면 폴백 유지
   im.src = "assets/"+n+".png";
 });
-function spr(n,x,y,scale=1,flip=false){
-  const im = IMG[n]; if(!im) return false;
-  const w = im.width*scale, h = im.height*scale;
-  ctx.save(); ctx.translate(x,y);
+// ASSET_SPEC 권장 표시 크기 (px). 파일이 이보다 크면 비율 유지로 자동 축소.
+// 스펙대로(파일 픽셀 = 표시 크기) 넣으면 축소 없이 1:1 렌더된다.
+const SPR_SIZE={player:[30,46],player_res:[30,46],seo:[26,42],wolf:[26,20],crane:[28,20],
+  turtle:[24,22],relic2:[10,26],grunt:[24,24],wraith:[22,26],ram:[38,32],
+  mini:[52,56],boss:[64,68],gem:[10,10]};
+function spr(n,x,y,scale=1,flip=false,target){
+  const im = IMG[n]; if(!im||!im.width) return false;
+  let w = im.width, h = im.height;
+  const tg = target||SPR_SIZE[n];
+  if(tg){                                    // 과대 이미지 방어 — 목표 박스에 맞춰 축소 (확대는 안 함)
+    const k = Math.min(tg[0]/w, tg[1]/h);
+    if(k < 1){ w*=k; h*=k; }
+  }
+  w = Math.max(1,Math.round(w*scale)); h = Math.max(1,Math.round(h*scale));
+  ctx.save(); ctx.imageSmoothingEnabled=false;   // NEAREST 유지
+  ctx.translate(Math.round(x),Math.round(y));
   if(flip) ctx.scale(-1,1);
   ctx.drawImage(im,-w/2,-h/2,w,h);
   ctx.restore(); return true;
@@ -57,6 +70,168 @@ const TAU = Math.PI*2;
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 const dist2=(a,b)=>{const dx=a.x-b.x,dy=a.y-b.y;return dx*dx+dy*dy;};
 const rnd=(a,b)=>a+Math.random()*(b-a);
+
+// ============================================================
+// 오디오 레이어 — WebAudio 절차 SFX + 선택적 BGM 파일(assets/bgm*.mp3)
+// 외부 파일이 없어도 SFX는 전부 동작한다. BGM만 무음.
+// ============================================================
+const MASTER_VOL=0.28, BGM_VOL=0.32;
+function lsGet(k){try{return localStorage.getItem(k);}catch(e){return null;}}
+function lsSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
+const AUD={ctx:null,master:null,muted:lsGet("hoiru_mute")==="1",started:false,
+           bgm:null,bgmBoss:null,noise:null,last:{}};
+function audioInit(){            // 최초 사용자 입력에서 1회 (autoplay 정책)
+  if(AUD.started)return; AUD.started=true;
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext;
+    if(AC){
+      AUD.ctx=new AC();
+      AUD.master=AUD.ctx.createGain();
+      AUD.master.gain.value=AUD.muted?0:MASTER_VOL;
+      AUD.master.connect(AUD.ctx.destination);
+    }
+  }catch(e){AUD.ctx=null;}
+  bgmInit();
+}
+function audioResume(){ if(AUD.ctx&&AUD.ctx.state==="suspended")AUD.ctx.resume().catch(()=>{}); }
+function toggleMute(){
+  AUD.muted=!AUD.muted; lsSet("hoiru_mute",AUD.muted?"1":"0");
+  if(AUD.master)AUD.master.gain.value=AUD.muted?0:MASTER_VOL;
+}
+function noiseBuf(){
+  if(AUD.noise)return AUD.noise;
+  const c=AUD.ctx,n=Math.floor(c.sampleRate*0.7),b=c.createBuffer(1,n,c.sampleRate),d=b.getChannelData(0);
+  for(let i=0;i<n;i++)d[i]=Math.random()*2-1;
+  AUD.noise=b; return b;
+}
+function tone(o){                // 오실레이터 1개 = 감쇠 톤
+  if(!AUD.ctx||AUD.muted)return;
+  const c=AUD.ctx,t0=c.currentTime+(o.delay||0),dur=o.dur||0.2,v=o.vol||0.15;
+  const osc=c.createOscillator(),g=c.createGain();
+  osc.type=o.type||"sine";
+  osc.frequency.setValueAtTime(o.f,t0);
+  if(o.f2)osc.frequency.exponentialRampToValueAtTime(Math.max(20,o.f2),t0+dur);
+  g.gain.setValueAtTime(0.0001,t0);
+  g.gain.exponentialRampToValueAtTime(v,t0+(o.atk||0.006));
+  g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+  osc.connect(g);g.connect(AUD.master);
+  osc.start(t0);osc.stop(t0+dur+0.03);
+}
+function nz(o){                  // 필터링된 노이즈 버스트 (붓질·타격음 재료)
+  if(!AUD.ctx||AUD.muted)return;
+  const c=AUD.ctx,t0=c.currentTime+(o.delay||0),dur=o.dur||0.2;
+  const s=c.createBufferSource();s.buffer=noiseBuf();
+  const f=c.createBiquadFilter();f.type=o.type||"lowpass";
+  f.frequency.setValueAtTime(o.fc||1200,t0);
+  if(o.fc2)f.frequency.exponentialRampToValueAtTime(Math.max(40,o.fc2),t0+dur);
+  f.Q.value=o.q||1;
+  const g=c.createGain();
+  g.gain.setValueAtTime(o.vol||0.12,t0);
+  g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+  s.connect(f);f.connect(g);g.connect(AUD.master);
+  s.start(t0);s.stop(t0+dur+0.03);
+}
+function sfxGate(k,ms){          // 동시 다발 타격음 폭주 방지
+  const n=performance.now();
+  if(AUD.last[k]&&n-AUD.last[k]<ms)return false;
+  AUD.last[k]=n;return true;
+}
+const SFX={
+  hit(){ if(!sfxGate("hit",45))return;                       // 타격 — 약한 틱
+    nz({type:"highpass",fc:2600,dur:0.045,vol:0.05});
+    tone({f:rnd(680,860),f2:300,type:"triangle",dur:0.05,vol:0.045}); },
+  kill(){ if(!sfxGate("kill",55))return;                     // 처치 — 먹 퍼지는 낮은 팝
+    tone({f:190,f2:52,type:"sine",dur:0.22,vol:0.12});
+    nz({type:"lowpass",fc:900,fc2:180,dur:0.26,vol:0.075}); },
+  summon(){                                                  // 승급/등장
+    [0,0.09,0.18].forEach((d,i)=>tone({f:294*Math.pow(1.26,i),type:"triangle",dur:0.42,vol:0.09,delay:d}));
+    nz({type:"bandpass",fc:1800,fc2:700,q:2,dur:0.4,vol:0.05}); },
+  pick(){                                                    // 선택 확정 — 목판 딱
+    tone({f:1180,f2:900,type:"square",dur:0.05,vol:0.05});
+    tone({f:590,type:"sine",dur:0.16,vol:0.08,delay:0.02}); },
+  res(){                                                     // 공명 — 장중한 종
+    [1,2.01,2.79,4.07].forEach((m,i)=>
+      tone({f:146.8*m,type:"sine",dur:2.8-i*0.45,vol:0.17/(i*1.4+1),atk:0.012}));
+    tone({f:73.4,type:"sine",dur:2.2,vol:0.12,atk:0.02});
+    nz({type:"lowpass",fc:1400,fc2:200,dur:0.7,vol:0.07}); },
+  ilseom(){                                                  // 일섬 — 붓질 스윕
+    nz({type:"bandpass",fc:5200,fc2:420,q:1.4,dur:0.38,vol:0.13});
+    tone({f:1400,f2:180,type:"sawtooth",dur:0.3,vol:0.05}); },
+  hurt(){ if(!sfxGate("hurt",180))return;                    // 피격
+    tone({f:172,f2:64,type:"square",dur:0.26,vol:0.11});
+    nz({type:"lowpass",fc:600,fc2:120,dur:0.3,vol:0.09}); },
+  boss(){                                                    // 보스 등장 — 저음 징
+    tone({f:58,type:"sawtooth",dur:2.6,vol:0.15,atk:0.05});
+    tone({f:87,type:"sine",dur:2.2,vol:0.1,atk:0.08});
+    tone({f:116.5,type:"sine",dur:1.6,vol:0.07,atk:0.1,delay:0.05});
+    nz({type:"lowpass",fc:2400,fc2:150,dur:1.4,vol:0.09}); },
+  bossAtk(){ if(!sfxGate("bossAtk",200))return;             // 보스/엘리트 공격
+    tone({f:110,f2:44,type:"sawtooth",dur:0.4,vol:0.09});
+    nz({type:"lowpass",fc:1200,fc2:200,dur:0.35,vol:0.07}); },
+  dash(){ if(!sfxGate("dash",120))return;                    // 경공
+    nz({type:"bandpass",fc:2600,fc2:800,q:1.2,dur:0.16,vol:0.06}); },
+  just(){ tone({f:1320,type:"sine",dur:0.28,vol:0.09});      // 저스트 회피
+    tone({f:1980,type:"sine",dur:0.2,vol:0.05,delay:0.03}); },
+  over(){                                                    // 책이 덮인다
+    tone({f:196,f2:49,type:"sine",dur:1.7,vol:0.14,atk:0.02});
+    nz({type:"lowpass",fc:700,fc2:90,dur:1.2,vol:0.08}); },
+  win(){                                                     // 복원 완료
+    [0,0.14,0.28,0.5].forEach((d,i)=>tone({f:[293.7,392,587.3,783.99][i],
+      type:"sine",dur:1.6,vol:0.11,atk:0.02,delay:d}));
+    nz({type:"lowpass",fc:1600,fc2:250,dur:0.8,vol:0.06}); },
+};
+// --- BGM: 파일이 있으면 루프, 없으면 조용히 무시 ---
+function mkBgm(src){
+  const a=new Audio(); a.loop=true; a.preload="auto"; a.volume=0; a.ok=false;
+  a.addEventListener("canplay",()=>{a.ok=true;});
+  a.addEventListener("error",()=>{a.ok=false;});
+  a.src=src; return a;
+}
+function bgmInit(){
+  if(AUD.bgm)return;
+  try{ AUD.bgm=mkBgm("assets/bgm.mp3"); AUD.bgmBoss=mkBgm("assets/bgm_boss.mp3"); }catch(e){}
+}
+function bgmUpdate(dt){          // 보스 페이즈 크로스페이드
+  const bossOn=!!(G&&G.bossPhase&&scene!=="title"&&AUD.bgmBoss&&AUD.bgmBoss.ok);
+  const pair=[[AUD.bgm,!bossOn],[AUD.bgmBoss,bossOn]];
+  for(const pr of pair){
+    const a=pr[0],on=pr[1];
+    if(!a||!a.ok)continue;
+    const tgt=(AUD.muted||!AUD.started)?0:(on?BGM_VOL:0);
+    const d=tgt-a.volume,st=dt*0.8;
+    a.volume=clamp(Math.abs(d)<=st?tgt:a.volume+(d>0?st:-st),0,1);
+    if(a.volume>0.001){ if(a.paused)a.play().catch(()=>{}); }
+    else if(!a.paused)a.pause();
+  }
+}
+// --- 음소거 토글 버튼 (우상단) ---
+const MUTE_BTN={x:W-26,y:24,r:16};
+function drawMuteBtn(){
+  const b=MUTE_BTN;
+  ctx.save();
+  ctx.globalAlpha=0.72;
+  ctx.fillStyle=INK;ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,TAU);ctx.fill();
+  ctx.globalAlpha=1;
+  ctx.translate(b.x-1,b.y);
+  // 스피커 몸통 — 사각(넥) + 원뿔. 이모지 폰트 의존 없이 벡터로만 그린다.
+  ctx.fillStyle=PAPER;
+  ctx.beginPath();
+  ctx.moveTo(-8,-3);ctx.lineTo(-4.5,-3);ctx.lineTo(-0.5,-7.5);
+  ctx.lineTo(-0.5,7.5);ctx.lineTo(-4.5,3);ctx.lineTo(-8,3);
+  ctx.closePath();ctx.fill();
+  ctx.strokeStyle=PAPER;ctx.lineCap="round";
+  if(AUD.muted){        // 꺼짐 — X 두 선
+    ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(3,-4.5);ctx.lineTo(9.5,4);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(9.5,-4.5);ctx.lineTo(3,4);ctx.stroke();
+  }else{                // 켜짐 — 음파 호 2개
+    ctx.lineWidth=1.8;
+    ctx.beginPath();ctx.arc(0,0,5,-0.72,0.72);ctx.stroke();
+    ctx.beginPath();ctx.arc(0,0,8.6,-0.72,0.72);ctx.stroke();
+  }
+  ctx.lineCap="butt";ctx.lineWidth=1;
+  ctx.restore();
+}
 
 // ---------- 상태 ----------
 let scene="title";            // title | play | levelup | over | win | pause
@@ -89,7 +264,9 @@ const keys={};
 let touchMove=null, lastTap=0;
 addEventListener("keydown",e=>{
   keys[e.code]=true;
+  audioInit(); audioResume();
   if(e.code==="Space")e.preventDefault();
+  if(e.code==="KeyM"){toggleMute();return;}
   if(scene==="title"&&(e.code==="Enter"||e.code==="Space"))startRun();
   else if(scene==="levelup"&&["Digit1","Digit2","Digit3"].includes(e.code))pick(+e.code.slice(5)-1);
   else if((scene==="over"||scene==="win")&&e.code==="KeyR")startRun();
@@ -107,8 +284,10 @@ let pendingStick=null;                       // 버튼을 누른 손가락이 �
 const hitBtn=(p,b)=>(p.x-b.x)**2+(p.y-b.y)**2<b.r**2;
 cv.addEventListener("pointerdown",e=>{
   e.preventDefault();
-  if(IS_TOUCH) goFull();
+  audioInit(); audioResume();
   const p=canvasPos(e);
+  if(hitBtn(p,MUTE_BTN)){toggleMute();return;}   // 음소거 토글은 모든 화면에서 최우선
+  if(IS_TOUCH) goFull();
   if(scene==="title")startRun();
   else if(scene==="over"||scene==="win")startRun();
   else if(scene==="levelup"){
@@ -150,7 +329,7 @@ function startRun(){
     tags:{baekdo:0,sword:0},
     slashTimer:12,offers:null,boss:null,miniDone:false,bossPhase:false,
     res:0,resT:0,resFace:{x:1,y:0},resUsed:false,lastJust:-9,parts:[],ghAcc:0,
-    shake:0,rank:{hitTaken:0}};
+    shake:0,hitstop:0,dimT:0,rank:{hitTaken:0}};
   addUnit("seo");
   scene="play";
 }
@@ -164,6 +343,7 @@ function tagsRecalc(){
 function synStep(tag){return SYN[tag].steps.filter(s=>G.tags[tag]>=s).length;}
 function addUnit(id){
   if(UNITS[id].consume){G.p.hp=Math.min(G.p.hpMax,G.p.hp+35);return;}
+  SFX.summon();
   if(G.roster[id]){G.roster[id]=Math.min(G.roster[id]+1,TIERS.length);}
   else{G.roster[id]=1;
     if(id!=="relic1")G.summons.push(makeSummon(id));}
@@ -202,6 +382,7 @@ function rollOffers(){
 }
 function pick(i){
   if(!G.offers||!G.offers[i])return;
+  SFX.pick();
   addUnit(G.offers[i]); G.offers=null; scene="play";
 }
 
@@ -211,10 +392,21 @@ function burst(x,y,col,n,spd,life=0.5,size=3){
     G.parts.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,t:0,life:rnd(life*0.6,life),col,size:rnd(1.5,size)});}
   if(G.parts.length>320)G.parts.splice(0,G.parts.length-320);
 }
+// 먹 튀김 — 속도 방향으로 늘어나는 획 파티클 (붓 흩뿌림 느낌)
+function inkSplat(x,y,n,spd){
+  for(let i=0;i<n;i++){const a=rnd(0,TAU),v=rnd(spd*0.45,spd);
+    G.parts.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,t:0,life:rnd(0.35,0.7),
+      col:Math.random()<0.25?"#3a3630":INK,size:rnd(1.2,3.2),streak:true});}
+  G.parts.push({x,y,vx:0,vy:0,t:0,life:0.45,col:INK,size:rnd(5,9),blot:true});
+  if(G.parts.length>320)G.parts.splice(0,G.parts.length-320);
+}
+// 화면 흔들림 — 진폭 3px 상한 (보스 공격·일섬 등 큰 순간에만)
+function shakeAdd(v){ if(G)G.shake=Math.min(3,Math.max(G.shake,v)); }
 function gainRes(v){ if(G.resT<=0) G.res=Math.min(100,G.res+v); }
 function resonate(){
   if(!G||G.res<100||G.resT>0||scene!=="play")return;
   G.res=0; G.resT=7; G.p.inv=0.4;
+  SFX.res(); G.hitstop=0.25; G.dimT=0.45;      // 히트스톱 + 암전 펄스
   G.fx.push({type:"shieldpop",x:G.p.x,y:G.p.y,t:0});
   if(!G.resUsed){G.resUsed=true;G.fx.push({type:"resmsg",t:0});}
 }
@@ -223,7 +415,7 @@ function resonate(){
 function dash(){
   const p=G.p;
   if(p.dashCd>0)return;
-  p.dashCd=1.5; p.dashT=0.16; p.inv=Math.max(p.inv,0.24);
+  p.dashCd=1.5; p.dashT=0.16; p.inv=Math.max(p.inv,0.24); SFX.dash();
   G.fx.push({type:"dashline",t:0,x:p.x,y:p.y,dx:p.dx,dy:p.dy});
 }
 
@@ -245,10 +437,11 @@ function spawnEnemy(kind){
   else if(kind==="ram")G.enemies.push({k:"ram",x,y,hp:110*s,hpMax:110*s,spd:46,r:17,dmg:24,state:"walk",aim:0,vx:0,vy:0,wob:rnd(0,TAU),lastHits:[]});
 }
 function spawnMini(){
+  SFX.boss(); shakeAdd(3);
   G.enemies.push({k:"mini",x:W/2,y:-40,hp:650*hpScale(),hpMax:650*hpScale(),spd:52,r:24,dmg:20,cd:2.5,wob:0,lastHits:[],boss:true,name:"광검수(狂劍手)"});
 }
 function spawnBoss(){
-  G.bossPhase=true;
+  G.bossPhase=true; SFX.boss(); shakeAdd(3); G.dimT=0.5;
   G.enemies.push({k:"boss",x:W/2,y:-60,hp:2400*hpScale(),hpMax:2400*hpScale(),spd:44,r:30,dmg:26,cd:3,pat:0,state:"walk",aim:0,vx:0,vy:0,wob:0,lastHits:[],boss:true,name:"타락한 대협"});
 }
 
@@ -264,16 +457,19 @@ function coopMul(e){
 function hitEnemy(e,dmg,src){
   e.lastHits.push({t:G.t,src});
   const d=dmg*coopMul(e);
-  e.hp-=d;
+  e.hp-=d; e.flash=0.06;                    // 히트 플래시 (약 2프레임)
   G.dmgTx.push({x:e.x+rnd(-6,6),y:e.y-e.r,v:Math.round(d),t:0});
   G.fx.push({type:"splash",x:e.x,y:e.y,t:0});
+  SFX.hit();
   if(e.hp<=0)killEnemy(e);
 }
 function killEnemy(e){
   if(e.dead)return; e.dead=true; G.kill++;
   if(G.resT>0)G.resT=Math.min(G.resT+0.3,10); else gainRes(2);
   burst(e.x,e.y,INK,e.boss?28:8,e.boss?280:150,0.5);
-  if(e.boss)G.shake=Math.max(G.shake,10);
+  inkSplat(e.x,e.y,e.boss?18:6,e.boss?260:150);   // 먹 튀김
+  SFX.kill();
+  if(e.boss){shakeAdd(3);G.dimT=Math.max(G.dimT||0,0.35);}
   const n=e.boss?12:(e.k==="ram"?4:1);
   for(let i=0;i<n;i++)G.gems.push({x:e.x+rnd(-10,10),y:e.y+rnd(-10,10),v:e.k==="wraith"?2:2});
   G.fx.push({type:"erase",x:e.x,y:e.y,r:e.r,t:0});
@@ -289,24 +485,27 @@ function hurtPlayer(dmg){
   }
   if(p.dashT>0){ // 저스트 회피 — 공명 게이지 획득
     if(G.t-G.lastJust>0.5){G.lastJust=G.t;gainRes(12);G.fx.push({type:"just",x:p.x,y:p.y,t:0});
-      burst(p.x,p.y,GOLD,10,190,0.5,2.5);}
+      SFX.just(); burst(p.x,p.y,GOLD,10,190,0.5,2.5);}
     return;
   }
   if(p.inv>0)return;
   if(p.shield>0){p.shield=0;p.shieldCd=8;p.inv=0.6;G.fx.push({type:"shieldpop",x:p.x,y:p.y,t:0});return;}
-  p.hp-=dmg; p.inv=0.7; G.shake=6; G.rank.hitTaken++;
-  if(p.hp<=0){regressions++;scene="over";}
+  p.hp-=dmg; p.inv=0.7; p.flash=0.06; G.rank.hitTaken++; SFX.hurt();
+  if(p.hp<=0){regressions++;scene="over";SFX.over();}
 }
 function winRun(){
-  scene="win";
+  scene="win"; SFX.win();
 }
 
 // ---------- 업데이트 ----------
 let last=performance.now();
 function frame(now){
   const dt=Math.min((now-last)/1000,0.05); last=now;
+  bgmUpdate(dt);
   if(IS_TOUCH&&scene==="play"&&isPortrait())scene="pause";
-  if(scene==="play")update(dt);
+  let sdt=dt;
+  if(G&&G.hitstop>0){G.hitstop-=dt;sdt=dt*0.06;}   // 히트스톱 (완전 정지 대신 초저속)
+  if(scene==="play")update(sdt);
   draw();
   if(IS_TOUCH&&isPortrait()){
     ctx.fillStyle="rgba(28,26,23,0.75)";ctx.fillRect(0,0,W,H);
@@ -315,6 +514,7 @@ function frame(now){
     ctx.font="15px serif";ctx.fillStyle=FAINT;
     ctx.fillText("回樓는 가로 화면 전용입니다",W/2,H/2+24);
   }
+  drawMuteBtn();
   requestAnimationFrame(frame);
 }
 function update(dt){
@@ -330,6 +530,8 @@ function update(dt){
   p.x=clamp(p.x+(p.dashT>0?p.dx:mx)*spd*dt,14,W-14);
   p.y=clamp(p.y+(p.dashT>0?p.dy:my)*spd*dt,14,H-14);
   p.inv=Math.max(0,p.inv-dt);p.dashCd=Math.max(0,p.dashCd-dt);p.dashT=Math.max(0,p.dashT-dt);
+  if(p.flash>0)p.flash-=dt;
+  if(G.dimT>0)G.dimT-=dt;
   if(p.dashT>0||G.resT>0){G.ghAcc+=dt;
     if(G.ghAcc>0.035){G.ghAcc=0;
       G.fx.push({type:"ghost",x:p.x,y:p.y,t:0,col:G.resT>0?BLUE:"#33404e"});}}
@@ -342,7 +544,7 @@ function update(dt){
     G.slashTimer-=dt;
     if(G.slashTimer<=0){G.slashTimer=12;
       const y=p.y;
-      G.fx.push({type:"ilseom",y,t:0}); G.shake=Math.max(G.shake,4);
+      G.fx.push({type:"ilseom",y,t:0,seed:rnd(0,10)}); shakeAdd(3); SFX.ilseom();
       for(const e of G.enemies)if(Math.abs(e.y-y)<46)hitEnemy(e,80,"ilseom");
     }
   }
@@ -362,7 +564,7 @@ function update(dt){
       const f=G.resFace,ba=Math.atan2(f.y,f.x);
       for(let i=-2;i<=2;i++)wave(p.x,p.y,Math.cos(ba+i*0.28),Math.sin(ba+i*0.28),24*mul("seo"),"res");
       G.fx.push({type:"finflash",x:p.x,y:p.y,t:0});
-      burst(p.x,p.y,BLUE,32,330,0.7,3.5); G.shake=Math.max(G.shake,8);
+      burst(p.x,p.y,BLUE,32,330,0.7,3.5); shakeAdd(2.5); SFX.ilseom();
     }
   }
   // --- 소환수 ---
@@ -424,10 +626,11 @@ function update(dt){
   for(const e of G.enemies){
     if(e.dead)continue;
     e.wob+=dt*4;
+    if(e.flash>0)e.flash-=dt;
     if(e.k==="grunt"||e.k==="mini"){
       const dx=p.x-e.x,dy=p.y-e.y,l=Math.hypot(dx,dy)||1;
       e.x+=dx/l*e.spd*dt;e.y+=dy/l*e.spd*dt;
-      if(e.k==="mini"){e.cd-=dt;if(e.cd<=0){e.cd=2.6;radial(e,10,120,10);}}
+      if(e.k==="mini"){e.cd-=dt;if(e.cd<=0){e.cd=2.6;radial(e,10,120,10);shakeAdd(2);SFX.bossAtk();}}
     }else if(e.k==="wraith"){
       const dx=p.x-e.x,dy=p.y-e.y,l=Math.hypot(dx,dy)||1;
       if(l>190){e.x+=dx/l*e.spd*dt;e.y+=dy/l*e.spd*dt;}
@@ -450,12 +653,13 @@ function update(dt){
         const dx=p.x-e.x,dy=p.y-e.y,l=Math.hypot(dx,dy)||1;
         e.x+=dx/l*e.spd*dt;e.y+=dy/l*e.spd*dt;
         if(e.cd<=0){e.pat=(e.pat+1)%3;e.cd=3.2;
-          if(e.pat===0)radial(e,16,150,12);
+          if(e.pat===0){radial(e,16,150,12);shakeAdd(2);SFX.bossAtk();}
           else if(e.pat===1){e.state="aim";e.aim=0.9;e.tx=p.x;e.ty=p.y;}
           else{for(let i=0;i<3;i++)spawnEnemy("grunt");}}
       }else if(e.state==="aim"){e.aim-=dt;
         if(e.aim<=0){const dx=e.tx-e.x,dy=e.ty-e.y,l=Math.hypot(dx,dy)||1;
-          e.vx=dx/l*470;e.vy=dy/l*470;e.state="dash";e.aim=0.6;}}
+          e.vx=dx/l*470;e.vy=dy/l*470;e.state="dash";e.aim=0.6;
+          shakeAdd(2.5);SFX.bossAtk();}}
       else{e.aim-=dt;e.x+=e.vx*dt;e.y+=e.vy*dt;if(e.aim<=0)e.state="walk";}
     }
     if(dist2(e,p)<(e.r+9)**2)hurtPlayer(e.dmg);
@@ -554,6 +758,8 @@ function draw(){
       inkBlob(e.x,e.y,e.r,e.wob,col);
       if(e.k==="wraith"){ctx.fillStyle=PAPER;ctx.fillRect(e.x-3,e.y-2,2,2);ctx.fillRect(e.x+1,e.y-2,2,2);}
     }
+    if(e.flash>0){ // 히트 플래시 — 흰 점멸
+      ctx.globalAlpha=0.85;inkBlob(e.x,e.y,e.r*1.04,e.wob,"#fffdf7");ctx.globalAlpha=1;}
     if(e.k==="ram"&&e.state==="aim"){ // 돌진 예고선
       ctx.strokeStyle=RED;ctx.globalAlpha=0.5;ctx.setLineDash([6,5]);
       ctx.beginPath();ctx.moveTo(e.x,e.y);ctx.lineTo(e.tx,e.ty);ctx.stroke();
@@ -620,11 +826,20 @@ function draw(){
       ctx.strokeStyle=BLUE;ctx.lineWidth=2;
       ctx.beginPath();ctx.moveTo(p.x+7,p.y-10);ctx.lineTo(p.x+7,p.y+11);ctx.stroke();ctx.lineWidth=1;}
   }else if(!spr("player",p.x,p.y,1,p.dx<0)) drawFigure(p.x,p.y,"#33404e",1);
+  if(p.flash>0){ctx.globalAlpha=0.8;drawFigure(p.x,p.y,"#fffdf7",1);ctx.globalAlpha=1;}
   if(p.shield>0){ctx.strokeStyle=BLUE;ctx.globalAlpha=0.6;
     ctx.beginPath();ctx.arc(p.x,p.y-4,17,0,TAU);ctx.stroke();ctx.globalAlpha=1;}
   // 파티클
-  for(const q of G.parts){ctx.fillStyle=q.col;ctx.globalAlpha=Math.max(0,1-q.t/q.life);
-    ctx.fillRect(q.x-q.size/2,q.y-q.size/2,q.size,q.size);}
+  for(const q of G.parts){
+    const a=Math.max(0,1-q.t/q.life);
+    ctx.globalAlpha=a;ctx.fillStyle=q.col;
+    if(q.blot){ // 먹 번짐 — 퍼지며 옅어지는 얼룩
+      ctx.globalAlpha=a*0.45;inkBlob(q.x,q.y,q.size*(1+q.t*3),q.t*6,q.col);}
+    else if(q.streak){ // 튀김 — 진행 방향으로 늘어난 획
+      ctx.strokeStyle=q.col;ctx.lineWidth=q.size*0.7;
+      ctx.beginPath();ctx.moveTo(q.x,q.y);
+      ctx.lineTo(q.x-q.vx*0.022,q.y-q.vy*0.022);ctx.stroke();ctx.lineWidth=1;}
+    else ctx.fillRect(q.x-q.size/2,q.y-q.size/2,q.size,q.size);}
   ctx.globalAlpha=1;
   // 공명 중 화면 테두리 오라
   if(G.resT>0){ctx.strokeStyle=BLUE;ctx.globalAlpha=0.22+0.1*Math.sin(performance.now()/120);
@@ -642,9 +857,22 @@ function draw(){
       ctx.beginPath();ctx.arc(f.x,f.y,f.r*0.5+f.t*95,0,TAU);ctx.stroke();ctx.globalAlpha=1;}
     else if(f.type==="ghost"){ctx.globalAlpha=0.3*(1-f.t/0.3);
       drawFigure(f.x,f.y,f.col,1);ctx.globalAlpha=1;}
-    else if(f.type==="ilseom"){ctx.strokeStyle=INK;ctx.globalAlpha=1-f.t/0.5;ctx.lineWidth=3;
-      ctx.beginPath();ctx.moveTo(0,f.y);ctx.lineTo(W,f.y);ctx.stroke();
-      ctx.lineWidth=1;ctx.globalAlpha=1;}
+    else if(f.type==="ilseom"){ // 일섬 — 전장을 가로지르는 붓질 한 획
+      const pr=clamp(f.t/0.5,0,1),fade=1-pr,sd=f.seed||0,N=26;
+      ctx.globalAlpha=0.92*fade;ctx.fillStyle=INK;
+      ctx.beginPath();
+      for(let i=0;i<=N;i++){const u=i/N,x=u*W,th=11*Math.pow(Math.sin(Math.PI*u),0.6)+1;
+        const yy=f.y-th+Math.sin(u*9+sd)*2.2;
+        if(i===0)ctx.moveTo(x,yy);else ctx.lineTo(x,yy);}
+      for(let i=N;i>=0;i--){const u=i/N,x=u*W,th=11*Math.pow(Math.sin(Math.PI*u),0.6)+1;
+        ctx.lineTo(x,f.y+th*0.55+Math.sin(u*9+sd)*2.2);}
+      ctx.closePath();ctx.fill();
+      ctx.globalAlpha=Math.max(0,1-pr*1.8);ctx.fillStyle="#fffdf7";
+      ctx.fillRect(pr*W*1.15-70,f.y-9,70,18);          // 선단 백섬광
+      ctx.globalAlpha=0.5*fade;ctx.fillStyle=INK;
+      for(let i=0;i<10;i++){const u=(i*0.11+sd*0.07)%1;
+        ctx.fillRect(u*W,f.y+Math.sin(i*3.3+sd)*22,2.2,2.2);}   // 흩날린 먹점
+      ctx.globalAlpha=1;}
     else if(f.type==="dashline"){ctx.strokeStyle="#33404e";ctx.globalAlpha=0.5*(1-f.t/0.4);
       ctx.beginPath();ctx.moveTo(f.x,f.y);ctx.lineTo(f.x-f.dx*60,f.y-f.dy*60);ctx.stroke();ctx.globalAlpha=1;}
     else if(f.type==="shieldpop"){ctx.strokeStyle=BLUE;ctx.globalAlpha=1-f.t/0.4;
@@ -657,6 +885,9 @@ function draw(){
       ctx.fillStyle=INK;ctx.font="bold 17px serif";ctx.textAlign="center";
       ctx.fillText("공명(共鳴) — 그녀의 검을, 직접 쥔다",W/2,120);ctx.globalAlpha=1;}
   }
+  // 암전 펄스 (공명 발동·보스 등장/격파)
+  if(G.dimT>0){const a=clamp(G.dimT/0.45,0,1);
+    ctx.fillStyle="rgba(20,18,15,"+(0.5*a*a).toFixed(3)+")";ctx.fillRect(-10,-10,W+20,H+20);}
   // 피해 숫자
   ctx.font="11px sans-serif";ctx.textAlign="center";
   for(const d of G.dmgTx){ctx.fillStyle=INK;ctx.globalAlpha=1-d.t/0.6;
@@ -672,29 +903,49 @@ function draw(){
       ctx.beginPath();ctx.arc(touchMove.ox+dx/l*kl,touchMove.oy+dy/l*kl,12,0,TAU);ctx.fill();
       ctx.globalAlpha=1;
     }
+    // 경공 — 먹빛 원 + 갈매기 아이콘
     const b=DASH_BTN,ready=G.p.dashCd<=0;
-    ctx.globalAlpha=0.55;
-    ctx.fillStyle=ready?"#33404e":"#c9c3b8";
+    ctx.save();ctx.textAlign="center";
+    ctx.globalAlpha=ready?0.82:0.45;
+    ctx.fillStyle=ready?"#2b3642":"#b9b2a5";
     ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,TAU);ctx.fill();
-    if(!ready){ctx.strokeStyle="#33404e";ctx.lineWidth=3;
-      ctx.beginPath();ctx.arc(b.x,b.y,b.r-2,-Math.PI/2,-Math.PI/2+TAU*(1-G.p.dashCd/1.5));ctx.stroke();ctx.lineWidth=1;}
-    ctx.fillStyle=PAPER;ctx.font="bold 14px serif";ctx.textAlign="center";
-    ctx.fillText("경공",b.x,b.y+5);
-    ctx.globalAlpha=1;
-    // 공명 버튼 (좌하단)
+    ctx.globalAlpha=ready?0.9:0.5;ctx.strokeStyle=INK;ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,TAU);ctx.stroke();
+    if(!ready){ctx.strokeStyle=PAPER;ctx.lineWidth=3;
+      ctx.beginPath();ctx.arc(b.x,b.y,b.r-4,-Math.PI/2,-Math.PI/2+TAU*(1-G.p.dashCd/1.5));ctx.stroke();}
+    ctx.globalAlpha=ready?1:0.6;
+    ctx.strokeStyle=PAPER;ctx.lineWidth=3;ctx.lineCap="round";
+    for(let i=0;i<2;i++){const ox=b.x-7+i*10;
+      ctx.beginPath();ctx.moveTo(ox-4,b.y-12);ctx.lineTo(ox+4,b.y-4);ctx.lineTo(ox-4,b.y+4);ctx.stroke();}
+    ctx.lineCap="butt";ctx.lineWidth=1;
+    ctx.fillStyle=PAPER;ctx.font="bold 11px serif";
+    ctx.fillText("경공",b.x,b.y+21);
+    ctx.restore();
+    // 공명 — 청 원 + 종 아이콘
     const rb=RES_BTN,rready=G.res>=100&&G.resT<=0;
-    ctx.globalAlpha=rready?0.75:0.35;
-    ctx.fillStyle=rready?BLUE:"#c9c3b8";
+    ctx.save();ctx.textAlign="center";
+    ctx.globalAlpha=rready?0.85:0.4;
+    ctx.fillStyle=rready?BLUE:"#b9b2a5";
     ctx.beginPath();ctx.arc(rb.x,rb.y,rb.r,0,TAU);ctx.fill();
+    ctx.globalAlpha=rready?0.95:0.55;ctx.strokeStyle=INK;ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(rb.x,rb.y,rb.r,0,TAU);ctx.stroke();
     if(!rready&&G.resT<=0){ctx.strokeStyle=BLUE;ctx.lineWidth=3;
-      ctx.beginPath();ctx.arc(rb.x,rb.y,rb.r-2,-Math.PI/2,-Math.PI/2+TAU*G.res/100);ctx.stroke();ctx.lineWidth=1;}
-    ctx.fillStyle=rready?PAPER:GREY;ctx.font="bold 13px serif";
-    ctx.fillText("공명",rb.x,rb.y+5);
-    ctx.globalAlpha=1;
+      ctx.beginPath();ctx.arc(rb.x,rb.y,rb.r-4,-Math.PI/2,-Math.PI/2+TAU*G.res/100);ctx.stroke();}
+    ctx.globalAlpha=1;ctx.lineWidth=1;
+    ctx.fillStyle=rready?PAPER:"#6b655c";
+    ctx.beginPath();ctx.moveTo(rb.x-8,rb.y+2);
+    ctx.quadraticCurveTo(rb.x-8,rb.y-10,rb.x,rb.y-12);
+    ctx.quadraticCurveTo(rb.x+8,rb.y-10,rb.x+8,rb.y+2);
+    ctx.closePath();ctx.fill();
+    ctx.fillRect(rb.x-10,rb.y+2,20,2.5);
+    ctx.beginPath();ctx.arc(rb.x,rb.y+7,2,0,TAU);ctx.fill();
+    ctx.font="bold 10px serif";
+    ctx.fillText("공명",rb.x,rb.y+21);
+    ctx.restore();
   }
   drawHUD();
   if(scene==="levelup")drawLevelup();
-  if(scene==="pause")overlayText("멈춤 — 탭 또는 P 키로 계속");
+  if(scene==="pause")drawPause();
   if(scene==="over")drawOver();
   if(scene==="win")drawWin();
   ctx.restore();
@@ -722,11 +973,11 @@ function drawHUD(){
   // 타이머/킬/레벨/회귀
   ctx.textAlign="right";ctx.font="14px serif";ctx.fillStyle=INK;
   const tt=G.bossPhase?"최종장":`${Math.floor(G.t/60)}:${String(Math.floor(G.t%60)).padStart(2,"0")}`;
-  ctx.fillText(tt,W-16,26);
+  ctx.fillText(tt,W-50,26);                    // 우상단 음소거 버튼 자리 확보
   ctx.font="11px serif";ctx.fillStyle=GREY;
-  ctx.fillText(`복원 ${G.kill}`,W-16,44);
-  ctx.fillText(`Lv ${G.lvl}`,W-16,60);
-  if(regressions>0)ctx.fillText(`회귀 ${regressions}`,W-16,76);
+  ctx.fillText(`복원 ${G.kill}`,W-50,44);
+  ctx.fillText(`Lv ${G.lvl}`,W-50,60);
+  if(regressions>0)ctx.fillText(`${regressions+1}번째 열람`,W-50,76);
   // 시너지 패널 (좌측)
   let y=22;ctx.textAlign="left";
   for(const k in SYN){
@@ -738,13 +989,14 @@ function drawHUD(){
       ctx.fillRect(70+i*14,y-8,10,8);});
     y+=20;
   }
-  // 시너지 플래시
+  // 시너지 플래시 (동시 발동 시 세로로 쌓아 겹침 방지)
+  let sfi=0;
   for(const f of G.fx)if(f.type==="synflash"){
     ctx.globalAlpha=Math.max(0,1-f.t/1.4);
     ctx.fillStyle=INK;ctx.font="bold 16px serif";ctx.textAlign="center";
     const st=synStep(f.tag);
-    ctx.fillText(`${SYN[f.tag].name} 시너지 — ${SYN[f.tag].desc[st-1]||""}`,W/2,90);
-    ctx.globalAlpha=1;}
+    ctx.fillText(`${SYN[f.tag].name} 시너지 — ${SYN[f.tag].desc[st-1]||""}`,W/2,90+sfi*24);
+    ctx.globalAlpha=1;sfi++;}
 }
 function drawLevelup(){
   ctx.fillStyle="rgba(28,26,23,0.55)";ctx.fillRect(0,0,W,H);
@@ -777,52 +1029,136 @@ function wrapText(txt,cx,y,maxW,lh){
     else line+=w+" ";}
   ctx.fillText(line.trim(),cx,y);
 }
+function drawPause(){          // 일시정지 — 조작 안내 재표시
+  ctx.fillStyle="rgba(242,237,227,0.92)";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle=INK;ctx.textAlign="center";
+  ctx.font="bold 26px serif";ctx.fillText("책을 잠시 덮는다",W/2,132);
+  ctx.fillStyle=GREY;ctx.font="12px serif";
+  ctx.fillText("— 조작 —",W/2,160);
+  const rows=IS_TOUCH
+    ?[["드래그","이동 (아무 곳이나)"],
+      ["우하단 [경공]","회피 — 순간 무적"],
+      ["그 위 [공명]","빙의 버스트 (게이지 100)"],
+      ["두 번째 손가락 탭","경공"],
+      ["우상단 스피커","음소거"]]
+    :[["WASD / 방향키","이동"],
+      ["Space","경공 — 회피, 저스트 시 공명 충전"],
+      ["E","공명 — 빙의 버스트"],
+      ["1 · 2 · 3","호명(레벨업) 선택"],
+      ["P / Esc","멈춤"],
+      ["M","음소거"]];
+  rows.forEach((r,i)=>{const y=196+i*30;
+    ctx.textAlign="right";ctx.fillStyle=INK;ctx.font="14px serif";ctx.fillText(r[0],W/2-14,y);
+    ctx.textAlign="left";ctx.fillStyle=GREY;ctx.font="13px serif";ctx.fillText(r[1],W/2+14,y);});
+  ctx.textAlign="center";ctx.fillStyle=INK;ctx.font="14px serif";
+  ctx.fillText(IS_TOUCH?"화면을 탭해 계속":"P 또는 Esc — 계속",W/2,H-46);
+}
 function overlayText(t){
   ctx.fillStyle="rgba(242,237,227,0.85)";ctx.fillRect(0,0,W,H);
   ctx.fillStyle=INK;ctx.font="bold 24px serif";ctx.textAlign="center";
   ctx.fillText(t,W/2,H/2);
 }
+// --- 런 요약 (승리/패배 공용) ---
+function mmss(s){return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,"0")}`;}
+function synSummary(){
+  const out=[];
+  for(const k in SYN){const st=synStep(k);if(st>0)out.push(`${SYN[k].name} ${G.tags[k]} (${st}단)`);}
+  return out.length?out.join(" · "):"— 미개방";
+}
+function runSummary(y,col,dim){
+  const rows=[["복원한 이름",`${G.kill}`],
+              ["생존 시간",mmss(G.t)],
+              ["도달 시너지",synSummary()],
+              ["호명 단계",`Lv ${G.lvl} · 소환 ${Object.keys(G.roster).length}종`]];
+  ctx.font="13px serif";
+  rows.forEach((r,i)=>{
+    const yy=y+i*22;
+    ctx.textAlign="right";ctx.fillStyle=dim;ctx.fillText(r[0],W/2-12,yy);
+    ctx.textAlign="left";ctx.fillStyle=col;ctx.fillText(r[1],W/2+12,yy);
+  });
+  ctx.textAlign="center";
+  ctx.strokeStyle=dim;ctx.globalAlpha=0.35;
+  ctx.beginPath();ctx.moveTo(W/2-190,y-20);ctx.lineTo(W/2+190,y-20);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(W/2-190,y+78);ctx.lineTo(W/2+190,y+78);ctx.stroke();
+  ctx.globalAlpha=1;
+}
 function drawOver(){
-  ctx.fillStyle="rgba(28,26,23,0.8)";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(28,26,23,0.82)";ctx.fillRect(0,0,W,H);
   ctx.fillStyle=PAPER;ctx.textAlign="center";
-  ctx.font="bold 30px serif";ctx.fillText("책이 덮였다",W/2,H/2-40);
-  ctx.font="15px serif";ctx.fillText("기록되지 못한 채, 첫 페이지로 되감긴다",W/2,H/2-6);
+  ctx.font="bold 30px serif";ctx.fillText("책이 덮였다",W/2,H/2-96);
+  ctx.font="15px serif";ctx.fillStyle=FAINT;
+  ctx.fillText("기록되지 못한 채, 첫 페이지로 되감긴다",W/2,H/2-66);
+  runSummary(H/2-14,PAPER,FAINT);
   ctx.fillStyle=FAINT;ctx.font="13px serif";
-  ctx.fillText(`복원한 이름 ${G.kill} · 도달 ${Math.floor(G.t/60)}:${String(Math.floor(G.t%60)).padStart(2,"0")}`,W/2,H/2+28);
-  ctx.fillStyle=PAPER;ctx.fillText("R 키 또는 클릭 — 다시 펼친다 (회귀)",W/2,H/2+64);
+  ctx.fillText(`${regressions}번째 열람이 여기서 끊겼다`,W/2,H/2+92);
+  ctx.fillStyle=PAPER;ctx.font="14px serif";
+  ctx.fillText(IS_TOUCH?"탭 — 다시 펼친다 (회귀)":"R 키 또는 클릭 — 다시 펼친다 (회귀)",W/2,H/2+124);
 }
 function drawWin(){
-  ctx.fillStyle="rgba(242,237,227,0.92)";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(242,237,227,0.93)";ctx.fillRect(0,0,W,H);
   ctx.fillStyle=INK;ctx.textAlign="center";
-  ctx.font="bold 30px serif";ctx.fillText("제일장(第一章) — 복원 완료",W/2,H/2-56);
+  ctx.font="bold 27px serif";ctx.fillText("제일장(第一章) — 복원 완료",W/2,68);
   const hits=G.rank.hitTaken;
   const rank=hits===0?"S++":hits<4?"S":hits<8?"A":hits<14?"B":"C";
-  ctx.font="bold 52px serif";ctx.fillStyle=rank[0]==="S"?BLUE:INK;
-  ctx.fillText(rank,W/2,H/2+6);
-  ctx.fillStyle=GREY;ctx.font="14px serif";
-  ctx.fillText(`복원한 이름 ${G.kill} · 피격 ${hits}회 · 회귀 ${regressions}회`,W/2,H/2+40);
-  ctx.fillStyle=INK;ctx.font="14px serif";
-  ctx.fillText("한 사람의 이름이, 기록으로 돌아왔다.",W/2,H/2+74);
+  ctx.font="bold 58px serif";ctx.fillStyle=rank[0]==="S"?BLUE:INK;
+  ctx.fillText(rank,W/2,140);
+  ctx.fillStyle=GREY;ctx.font="12px serif";ctx.fillText(`사관(史官) 평가 · 피격 ${hits}회`,W/2,162);
+  runSummary(210,INK,GREY);
+  ctx.fillStyle=INK;ctx.font="15px serif";
+  ctx.fillText("한 사람의 이름이, 기록으로 돌아왔다.",W/2,350);
+  ctx.fillStyle=GREY;ctx.font="12px serif";
+  ctx.fillText(`${regressions+1}번째 열람에서 닿았다`,W/2,378);
   ctx.fillStyle=FAINT;ctx.font="12px serif";
-  ctx.fillText("R 키 또는 클릭 — 다른 사관(史觀)으로 다시 읽는다",W/2,H/2+100);
+  ctx.fillText(IS_TOUCH?"탭 — 다른 사관(史觀)으로 다시 읽는다":"R 키 또는 클릭 — 다른 사관(史觀)으로 다시 읽는다",W/2,412);
 }
 function drawTitle(){
-  ctx.fillStyle=INK;ctx.textAlign="center";
-  ctx.font="bold 76px serif";ctx.fillText("回 樓",W/2,170);
-  ctx.font="20px serif";ctx.fillText("회루 — 지워진 이름을 되살려라",W/2,212);
+  ctx.textAlign="center";
+  const cx=W/2;
+  // --- 제자(題字): 세로 붓글씨 ---
+  ctx.save();
+  ctx.globalAlpha=0.035;ctx.fillStyle=INK;             // 먹 번짐 바탕
+  ctx.beginPath();ctx.ellipse(cx,120,60,110,0,0,TAU);ctx.fill();
+  ctx.globalAlpha=0.4;ctx.strokeStyle=GREY;ctx.lineWidth=1;  // 세로 괘선 (책장)
+  ctx.beginPath();ctx.moveTo(cx+58,34);ctx.lineTo(cx+58,186);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(cx-58,34);ctx.lineTo(cx-58,186);ctx.stroke();
+  ctx.globalAlpha=1;
+  ["回","樓"].forEach((ch,i)=>{
+    const y=86+i*80;
+    ctx.globalAlpha=0.18;ctx.fillStyle=INK;ctx.font="bold 80px serif";
+    ctx.fillText(ch,cx+3,y+3.5);                        // 번진 잔상 = 붓 자국
+    ctx.globalAlpha=1;ctx.font="bold 74px serif";
+    ctx.fillText(ch,cx,y);
+  });
+  ctx.restore();
+  ctx.fillStyle=INK;ctx.font="18px serif";
+  ctx.fillText("회루 — 지워진 이름을 되살려라",cx,204);
   ctx.fillStyle=GREY;ctx.font="13px serif";
-  ctx.fillText("무림은 실재했고, 역사에서 지워졌다.",W/2,260);
-  ctx.fillText("유일한 독자였던 당신이 그 기록 속으로 떨어졌다.",W/2,282);
-  ctx.fillText("지워진 인물들을 기억으로 되살려 — 군단을 이끌어라.",W/2,304);
+  ctx.fillText("무림은 실재했고, 역사에서 지워졌다.",cx,244);
+  ctx.fillText("유일한 독자였던 당신이 그 기록 속으로 떨어졌다.",cx,266);
+  ctx.fillText("지워진 인물들을 기억으로 되살려 — 군단을 이끌어라.",cx,288);
+  // 회귀 카운터 — 서사 문구
+  if(regressions>0){
+    ctx.fillStyle=GOLD;ctx.font="13px serif";
+    ctx.fillText(`${regressions+1}번째 열람 — 같은 책, 다른 사관(史觀)`,cx,322);
+  }
+  // 조작 안내 (플랫폼 자동)
   ctx.fillStyle=INK;ctx.font="14px serif";
-  ctx.fillText("이동: WASD / 방향키 · 경공(회피): Space · 공명(빙의 버스트): E · 소환수는 자동 전투",W/2,368);
-  ctx.fillText("모바일: 드래그 이동 · 우하단 경공 · 좌하단 공명 (가로 화면 권장)",W/2,392);
-  ctx.font="bold 18px serif";
-  ctx.fillText(((performance.now()/600|0)%2===0)?"— 책을 펼친다 (Enter / 탭) —":"",W/2,448);
+  if(IS_TOUCH){
+    ctx.fillText("아무 곳이나 드래그 — 이동 · 우하단 [경공] 회피 · 그 위 [공명] 빙의",cx,362);
+    ctx.fillStyle=GREY;ctx.font="12px serif";
+    ctx.fillText("두 번째 손가락 탭도 경공 · 소환수는 자동 전투 · 가로 화면 전용",cx,386);
+  }else{
+    ctx.fillText("WASD / 방향키 — 이동 · Space — 경공(회피) · E — 공명(빙의 버스트)",cx,362);
+    ctx.fillStyle=GREY;ctx.font="12px serif";
+    ctx.fillText("소환수는 자동 전투 · 레벨업 시 1·2·3 으로 호명 · P 멈춤 · M 음소거",cx,386);
+  }
+  ctx.fillStyle=INK;ctx.font="bold 18px serif";
+  ctx.fillText(((performance.now()/600|0)%2===0)
+    ?(IS_TOUCH?"— 화면을 탭해 책을 펼친다 —":"— 책을 펼친다 (Enter) —"):"",cx,440);
   ctx.fillStyle=FAINT;ctx.font="11px serif";
-  ctx.fillText("NAN 2026 해커톤 데모 · 6분 런 · 3분 중간보스 · 5분 30초 최종보스",W/2,500);
+  ctx.fillText("NAN 2026 해커톤 데모 · 6분 런 · 3분 중간보스 · 5분 30초 최종보스",cx,500);
   // 인장
-  ctx.save();ctx.translate(W-90,60);ctx.rotate(0.05);
+  ctx.save();ctx.translate(W-96,88);ctx.rotate(0.05);
   ctx.fillStyle="#a63a2a";ctx.fillRect(0,0,52,52);
   ctx.fillStyle=PAPER;ctx.font="bold 18px serif";
   ctx.fillText("回",26,22);ctx.fillText("樓",26,44);ctx.restore();
