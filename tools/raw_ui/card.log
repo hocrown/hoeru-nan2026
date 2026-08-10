@@ -1,0 +1,19 @@
+{
+  "kind": "sprite-gen-image-report",
+  "provider": "codex",
+  "prompt": "Korean ink-wash style game UI card frame, portrait. Aged hanji paper card (warm ivory #f2ede3) with irregular hand-brushed ink border strokes, subtle paper fiber texture, a faint water stain near one corner, one small red seal stamp in the bottom-right corner, large empty center for text. Minimal, elegant, muted ink tones. No text, no letters, no watermark.",
+  "out": "/mnt/d/12.개인프로젝트/31.진무영-NHN FEST/tools/raw_ui/card.png",
+  "raw": "/mnt/d/12.개인프로젝트/31.진무영-NHN FEST/tools/raw_ui/card.png.raw.png",
+  "raw_bytes": 2949332,
+  "elapsed_seconds": 127.336,
+  "model": null,
+  "session_id": "019febc6-997b-7fb1-926f-7a3d089aaee2",
+  "refs": [],
+  "transparent": false,
+  "chroma": null,
+  "extra": {
+    "inline_results": 1,
+    "rollout_cleaned": true
+  },
+  "provider_resolved_from": "explicit"
+}

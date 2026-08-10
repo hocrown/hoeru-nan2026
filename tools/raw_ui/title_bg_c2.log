@@ -1,0 +1,19 @@
+{
+  "kind": "sprite-gen-image-report",
+  "provider": "codex",
+  "prompt": "Korean ink-wash sumi-e painting, game title key art, wide landscape. An ancient multi-story pavilion emerging from mist on the right side, deep charcoal ink strokes on aged hanji paper texture (warm ivory #f2ede3). Foreground lower-left: small silhouette of a young woman swordswoman in a white robe with a water-blue #3d6b8f sash holding a slender jian, facing the pavilion. Faint ghostly ink shadows dissolving in the mist. Large empty negative space in the upper-center for title typography. Muted palette: ink black, ash grey, warm ivory, one water-blue accent, a single small red seal stamp. Atmospheric, melancholic, elegant. No text, no letters, no watermark. Variation: pavilion slightly left of center-right, stronger mist, swordswoman closer to center.",
+  "out": "/mnt/d/12.개인프로젝트/31.진무영-NHN FEST/tools/raw_ui/title_bg_c2.png",
+  "raw": "/mnt/d/12.개인프로젝트/31.진무영-NHN FEST/tools/raw_ui/title_bg_c2.png.raw.png",
+  "raw_bytes": 2676585,
+  "elapsed_seconds": 124.798,
+  "model": null,
+  "session_id": "019febc6-998b-7d82-84b9-44645903759c",
+  "refs": [],
+  "transparent": false,
+  "chroma": null,
+  "extra": {
+    "inline_results": 1,
+    "rollout_cleaned": true
+  },
+  "provider_resolved_from": "explicit"
+}
