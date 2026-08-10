@@ -35,10 +35,22 @@ const IMG = {};
   im.onerror = ()=>{};           // 없으면 폴백 유지
   im.src = "assets/"+n+".png";
 });
-function spr(n,x,y,scale=1,flip=false){
-  const im = IMG[n]; if(!im) return false;
-  const w = im.width*scale, h = im.height*scale;
-  ctx.save(); ctx.translate(x,y);
+// ASSET_SPEC 권장 표시 크기 (px). 파일이 이보다 크면 비율 유지로 자동 축소.
+// 스펙대로(파일 픽셀 = 표시 크기) 넣으면 축소 없이 1:1 렌더된다.
+const SPR_SIZE={player:[30,46],player_res:[30,46],seo:[26,42],wolf:[26,20],crane:[28,20],
+  turtle:[24,22],relic2:[10,26],grunt:[24,24],wraith:[22,26],ram:[38,32],
+  mini:[52,56],boss:[64,68],gem:[10,10]};
+function spr(n,x,y,scale=1,flip=false,target){
+  const im = IMG[n]; if(!im||!im.width) return false;
+  let w = im.width, h = im.height;
+  const tg = target||SPR_SIZE[n];
+  if(tg){                                    // 과대 이미지 방어 — 목표 박스에 맞춰 축소 (확대는 안 함)
+    const k = Math.min(tg[0]/w, tg[1]/h);
+    if(k < 1){ w*=k; h*=k; }
+  }
+  w = Math.max(1,Math.round(w*scale)); h = Math.max(1,Math.round(h*scale));
+  ctx.save(); ctx.imageSmoothingEnabled=false;   // NEAREST 유지
+  ctx.translate(Math.round(x),Math.round(y));
   if(flip) ctx.scale(-1,1);
   ctx.drawImage(im,-w/2,-h/2,w,h);
   ctx.restore(); return true;
@@ -159,6 +171,13 @@ const SFX={
     nz({type:"bandpass",fc:2600,fc2:800,q:1.2,dur:0.16,vol:0.06}); },
   just(){ tone({f:1320,type:"sine",dur:0.28,vol:0.09});      // 저스트 회피
     tone({f:1980,type:"sine",dur:0.2,vol:0.05,delay:0.03}); },
+  over(){                                                    // 책이 덮인다
+    tone({f:196,f2:49,type:"sine",dur:1.7,vol:0.14,atk:0.02});
+    nz({type:"lowpass",fc:700,fc2:90,dur:1.2,vol:0.08}); },
+  win(){                                                     // 복원 완료
+    [0,0.14,0.28,0.5].forEach((d,i)=>tone({f:[293.7,392,587.3,783.99][i],
+      type:"sine",dur:1.6,vol:0.11,atk:0.02,delay:d}));
+    nz({type:"lowpass",fc:1600,fc2:250,dur:0.8,vol:0.06}); },
 };
 // --- BGM: 파일이 있으면 루프, 없으면 조용히 무시 ---
 function mkBgm(src){
@@ -457,10 +476,10 @@ function hurtPlayer(dmg){
   if(p.inv>0)return;
   if(p.shield>0){p.shield=0;p.shieldCd=8;p.inv=0.6;G.fx.push({type:"shieldpop",x:p.x,y:p.y,t:0});return;}
   p.hp-=dmg; p.inv=0.7; p.flash=0.06; G.rank.hitTaken++; SFX.hurt();
-  if(p.hp<=0){regressions++;scene="over";}
+  if(p.hp<=0){regressions++;scene="over";SFX.over();}
 }
 function winRun(){
-  scene="win";
+  scene="win"; SFX.win();
 }
 
 // ---------- 업데이트 ----------
@@ -827,10 +846,10 @@ function draw(){
       const pr=clamp(f.t/0.5,0,1),fade=1-pr,sd=f.seed||0,N=26;
       ctx.globalAlpha=0.92*fade;ctx.fillStyle=INK;
       ctx.beginPath();
-      for(let i=0;i<=N;i++){const u=i/N,x=u*W,th=15*Math.pow(Math.sin(Math.PI*u),0.55)+1;
+      for(let i=0;i<=N;i++){const u=i/N,x=u*W,th=11*Math.pow(Math.sin(Math.PI*u),0.6)+1;
         const yy=f.y-th+Math.sin(u*9+sd)*2.2;
         if(i===0)ctx.moveTo(x,yy);else ctx.lineTo(x,yy);}
-      for(let i=N;i>=0;i--){const u=i/N,x=u*W,th=15*Math.pow(Math.sin(Math.PI*u),0.55)+1;
+      for(let i=N;i>=0;i--){const u=i/N,x=u*W,th=11*Math.pow(Math.sin(Math.PI*u),0.6)+1;
         ctx.lineTo(x,f.y+th*0.55+Math.sin(u*9+sd)*2.2);}
       ctx.closePath();ctx.fill();
       ctx.globalAlpha=Math.max(0,1-pr*1.8);ctx.fillStyle="#fffdf7";
@@ -935,13 +954,14 @@ function drawHUD(){
       ctx.fillRect(70+i*14,y-8,10,8);});
     y+=20;
   }
-  // 시너지 플래시
+  // 시너지 플래시 (동시 발동 시 세로로 쌓아 겹침 방지)
+  let sfi=0;
   for(const f of G.fx)if(f.type==="synflash"){
     ctx.globalAlpha=Math.max(0,1-f.t/1.4);
     ctx.fillStyle=INK;ctx.font="bold 16px serif";ctx.textAlign="center";
     const st=synStep(f.tag);
-    ctx.fillText(`${SYN[f.tag].name} 시너지 — ${SYN[f.tag].desc[st-1]||""}`,W/2,90);
-    ctx.globalAlpha=1;}
+    ctx.fillText(`${SYN[f.tag].name} 시너지 — ${SYN[f.tag].desc[st-1]||""}`,W/2,90+sfi*24);
+    ctx.globalAlpha=1;sfi++;}
 }
 function drawLevelup(){
   ctx.fillStyle="rgba(28,26,23,0.55)";ctx.fillRect(0,0,W,H);
@@ -979,47 +999,107 @@ function overlayText(t){
   ctx.fillStyle=INK;ctx.font="bold 24px serif";ctx.textAlign="center";
   ctx.fillText(t,W/2,H/2);
 }
+// --- 런 요약 (승리/패배 공용) ---
+function mmss(s){return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,"0")}`;}
+function synSummary(){
+  const out=[];
+  for(const k in SYN){const st=synStep(k);if(st>0)out.push(`${SYN[k].name} ${G.tags[k]} (${st}단)`);}
+  return out.length?out.join(" · "):"— 미개방";
+}
+function runSummary(y,col,dim){
+  const rows=[["복원한 이름",`${G.kill}`],
+              ["생존 시간",mmss(G.t)],
+              ["도달 시너지",synSummary()],
+              ["호명 단계",`Lv ${G.lvl} · 소환 ${Object.keys(G.roster).length}종`]];
+  ctx.font="13px serif";
+  rows.forEach((r,i)=>{
+    const yy=y+i*22;
+    ctx.textAlign="right";ctx.fillStyle=dim;ctx.fillText(r[0],W/2-12,yy);
+    ctx.textAlign="left";ctx.fillStyle=col;ctx.fillText(r[1],W/2+12,yy);
+  });
+  ctx.textAlign="center";
+  ctx.strokeStyle=dim;ctx.globalAlpha=0.35;
+  ctx.beginPath();ctx.moveTo(W/2-190,y-20);ctx.lineTo(W/2+190,y-20);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(W/2-190,y+78);ctx.lineTo(W/2+190,y+78);ctx.stroke();
+  ctx.globalAlpha=1;
+}
 function drawOver(){
-  ctx.fillStyle="rgba(28,26,23,0.8)";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(28,26,23,0.82)";ctx.fillRect(0,0,W,H);
   ctx.fillStyle=PAPER;ctx.textAlign="center";
-  ctx.font="bold 30px serif";ctx.fillText("책이 덮였다",W/2,H/2-40);
-  ctx.font="15px serif";ctx.fillText("기록되지 못한 채, 첫 페이지로 되감긴다",W/2,H/2-6);
+  ctx.font="bold 30px serif";ctx.fillText("책이 덮였다",W/2,H/2-96);
+  ctx.font="15px serif";ctx.fillStyle=FAINT;
+  ctx.fillText("기록되지 못한 채, 첫 페이지로 되감긴다",W/2,H/2-66);
+  runSummary(H/2-14,PAPER,FAINT);
   ctx.fillStyle=FAINT;ctx.font="13px serif";
-  ctx.fillText(`복원한 이름 ${G.kill} · 도달 ${Math.floor(G.t/60)}:${String(Math.floor(G.t%60)).padStart(2,"0")}`,W/2,H/2+28);
-  ctx.fillStyle=PAPER;ctx.fillText("R 키 또는 클릭 — 다시 펼친다 (회귀)",W/2,H/2+64);
+  ctx.fillText(`${regressions}번째 열람이 여기서 끊겼다`,W/2,H/2+92);
+  ctx.fillStyle=PAPER;ctx.font="14px serif";
+  ctx.fillText(IS_TOUCH?"탭 — 다시 펼친다 (회귀)":"R 키 또는 클릭 — 다시 펼친다 (회귀)",W/2,H/2+124);
 }
 function drawWin(){
-  ctx.fillStyle="rgba(242,237,227,0.92)";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(242,237,227,0.93)";ctx.fillRect(0,0,W,H);
   ctx.fillStyle=INK;ctx.textAlign="center";
-  ctx.font="bold 30px serif";ctx.fillText("제일장(第一章) — 복원 완료",W/2,H/2-56);
+  ctx.font="bold 27px serif";ctx.fillText("제일장(第一章) — 복원 완료",W/2,68);
   const hits=G.rank.hitTaken;
   const rank=hits===0?"S++":hits<4?"S":hits<8?"A":hits<14?"B":"C";
-  ctx.font="bold 52px serif";ctx.fillStyle=rank[0]==="S"?BLUE:INK;
-  ctx.fillText(rank,W/2,H/2+6);
-  ctx.fillStyle=GREY;ctx.font="14px serif";
-  ctx.fillText(`복원한 이름 ${G.kill} · 피격 ${hits}회 · 회귀 ${regressions}회`,W/2,H/2+40);
-  ctx.fillStyle=INK;ctx.font="14px serif";
-  ctx.fillText("한 사람의 이름이, 기록으로 돌아왔다.",W/2,H/2+74);
+  ctx.font="bold 58px serif";ctx.fillStyle=rank[0]==="S"?BLUE:INK;
+  ctx.fillText(rank,W/2,140);
+  ctx.fillStyle=GREY;ctx.font="12px serif";ctx.fillText(`사관(史官) 평가 · 피격 ${hits}회`,W/2,162);
+  runSummary(210,INK,GREY);
+  ctx.fillStyle=INK;ctx.font="15px serif";
+  ctx.fillText("한 사람의 이름이, 기록으로 돌아왔다.",W/2,350);
+  ctx.fillStyle=GREY;ctx.font="12px serif";
+  ctx.fillText(`${regressions+1}번째 열람에서 닿았다`,W/2,378);
   ctx.fillStyle=FAINT;ctx.font="12px serif";
-  ctx.fillText("R 키 또는 클릭 — 다른 사관(史觀)으로 다시 읽는다",W/2,H/2+100);
+  ctx.fillText(IS_TOUCH?"탭 — 다른 사관(史觀)으로 다시 읽는다":"R 키 또는 클릭 — 다른 사관(史觀)으로 다시 읽는다",W/2,412);
 }
 function drawTitle(){
-  ctx.fillStyle=INK;ctx.textAlign="center";
-  ctx.font="bold 76px serif";ctx.fillText("回 樓",W/2,170);
-  ctx.font="20px serif";ctx.fillText("회루 — 지워진 이름을 되살려라",W/2,212);
+  ctx.textAlign="center";
+  const cx=W/2;
+  // --- 제자(題字): 세로 붓글씨 ---
+  ctx.save();
+  ctx.globalAlpha=0.035;ctx.fillStyle=INK;             // 먹 번짐 바탕
+  ctx.beginPath();ctx.ellipse(cx,120,60,110,0,0,TAU);ctx.fill();
+  ctx.globalAlpha=0.4;ctx.strokeStyle=GREY;ctx.lineWidth=1;  // 세로 괘선 (책장)
+  ctx.beginPath();ctx.moveTo(cx+58,34);ctx.lineTo(cx+58,186);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(cx-58,34);ctx.lineTo(cx-58,186);ctx.stroke();
+  ctx.globalAlpha=1;
+  ["回","樓"].forEach((ch,i)=>{
+    const y=86+i*80;
+    ctx.globalAlpha=0.18;ctx.fillStyle=INK;ctx.font="bold 80px serif";
+    ctx.fillText(ch,cx+3,y+3.5);                        // 번진 잔상 = 붓 자국
+    ctx.globalAlpha=1;ctx.font="bold 74px serif";
+    ctx.fillText(ch,cx,y);
+  });
+  ctx.restore();
+  ctx.fillStyle=INK;ctx.font="18px serif";
+  ctx.fillText("회루 — 지워진 이름을 되살려라",cx,204);
   ctx.fillStyle=GREY;ctx.font="13px serif";
-  ctx.fillText("무림은 실재했고, 역사에서 지워졌다.",W/2,260);
-  ctx.fillText("유일한 독자였던 당신이 그 기록 속으로 떨어졌다.",W/2,282);
-  ctx.fillText("지워진 인물들을 기억으로 되살려 — 군단을 이끌어라.",W/2,304);
+  ctx.fillText("무림은 실재했고, 역사에서 지워졌다.",cx,244);
+  ctx.fillText("유일한 독자였던 당신이 그 기록 속으로 떨어졌다.",cx,266);
+  ctx.fillText("지워진 인물들을 기억으로 되살려 — 군단을 이끌어라.",cx,288);
+  // 회귀 카운터 — 서사 문구
+  if(regressions>0){
+    ctx.fillStyle=GOLD;ctx.font="13px serif";
+    ctx.fillText(`${regressions+1}번째 열람 — 같은 책, 다른 사관(史觀)`,cx,322);
+  }
+  // 조작 안내 (플랫폼 자동)
   ctx.fillStyle=INK;ctx.font="14px serif";
-  ctx.fillText("이동: WASD / 방향키 · 경공(회피): Space · 공명(빙의 버스트): E · 소환수는 자동 전투",W/2,368);
-  ctx.fillText("모바일: 드래그 이동 · 우하단 경공 · 좌하단 공명 (가로 화면 권장)",W/2,392);
-  ctx.font="bold 18px serif";
-  ctx.fillText(((performance.now()/600|0)%2===0)?"— 책을 펼친다 (Enter / 탭) —":"",W/2,448);
+  if(IS_TOUCH){
+    ctx.fillText("아무 곳이나 드래그 — 이동 · 우하단 [경공] 회피 · 그 위 [공명] 빙의",cx,362);
+    ctx.fillStyle=GREY;ctx.font="12px serif";
+    ctx.fillText("두 번째 손가락 탭도 경공 · 소환수는 자동 전투 · 가로 화면 전용",cx,386);
+  }else{
+    ctx.fillText("WASD / 방향키 — 이동 · Space — 경공(회피) · E — 공명(빙의 버스트)",cx,362);
+    ctx.fillStyle=GREY;ctx.font="12px serif";
+    ctx.fillText("소환수는 자동 전투 · 레벨업 시 1·2·3 으로 호명 · P 멈춤 · M 음소거",cx,386);
+  }
+  ctx.fillStyle=INK;ctx.font="bold 18px serif";
+  ctx.fillText(((performance.now()/600|0)%2===0)
+    ?(IS_TOUCH?"— 화면을 탭해 책을 펼친다 —":"— 책을 펼친다 (Enter) —"):"",cx,440);
   ctx.fillStyle=FAINT;ctx.font="11px serif";
-  ctx.fillText("NAN 2026 해커톤 데모 · 6분 런 · 3분 중간보스 · 5분 30초 최종보스",W/2,500);
+  ctx.fillText("NAN 2026 해커톤 데모 · 6분 런 · 3분 중간보스 · 5분 30초 최종보스",cx,500);
   // 인장
-  ctx.save();ctx.translate(W-90,60);ctx.rotate(0.05);
+  ctx.save();ctx.translate(W-96,88);ctx.rotate(0.05);
   ctx.fillStyle="#a63a2a";ctx.fillRect(0,0,52,52);
   ctx.fillStyle=PAPER;ctx.font="bold 18px serif";
   ctx.fillText("回",26,22);ctx.fillText("樓",26,44);ctx.restore();
