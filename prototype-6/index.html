@@ -250,6 +250,10 @@ const SFX={
 // BGM 크로스페이드와 간섭하지 않도록 완전히 별도 Audio 인스턴스를 쓴다.
 const STINGER_VOL=0.5;
 const STINGER_NAMES=["sfx_boss","sfx_mini","sfx_summon","sfx_win","sfx_lose"];
+// 길이 캡 — 원본 파일을 자르지 않고 코드에서 끊는다 (SUNO 등 곡 길이 전체가 와도 안전).
+// cap 시점부터 STINGER_FADE 동안 볼륨 램프 후 정지. 파일이 더 짧으면 자연 종료.
+const STINGER_CAP={sfx_win:5.0,sfx_lose:5.0};   // 승패 화면은 5초
+const STINGER_CAP_DEFAULT=3.5, STINGER_FADE=0.6;
 const STG={};
 function stingerInit(){
   if(STG.__init)return; STG.__init=true;
@@ -268,14 +272,29 @@ function stinger(n){
   const a=STG[n];
   if(!a||!a.ok)return false;
   if(!AUD.muted){                       // 음소거면 파일이 있어도 소리를 내지 않는다
-    try{ a.currentTime=0; const p=a.play(); if(p&&p.catch)p.catch(()=>{}); }
+    try{ a.currentTime=0; a.volume=STINGER_VOL;   // 이전 페이드 상태 초기화
+      const p=a.play(); if(p&&p.catch)p.catch(()=>{}); }
     catch(e){}                          // 재생 실패(오토플레이 정책 등)는 조용히 무시
   }
   return true;
 }
+// 매 프레임 호출 — 재생 위치를 보고 캡/페이드 처리. 음소거 토글과 독립적으로 동작한다.
+function stingerUpdate(){
+  for(const n of STINGER_NAMES){
+    const a=STG[n];
+    if(!a||a.paused)continue;
+    const cap=STINGER_CAP[n]||STINGER_CAP_DEFAULT, t=a.currentTime;
+    if(t>=cap+STINGER_FADE){
+      try{a.pause();a.currentTime=0;}catch(e){}
+      a.volume=STINGER_VOL;
+    }else if(t>=cap){
+      a.volume=clamp(STINGER_VOL*(1-(t-cap)/STINGER_FADE),0,1);
+    }
+  }
+}
 function stingerStop(){
   for(const n of STINGER_NAMES){const a=STG[n];
-    if(a&&!a.paused){try{a.pause();a.currentTime=0;}catch(e){}}}
+    if(a&&!a.paused){try{a.pause();a.currentTime=0;}catch(e){}a.volume=STINGER_VOL;}}
 }
 // --- BGM: 파일이 있으면 루프, 없으면 조용히 무시 ---
 function mkBgm(src){
@@ -618,7 +637,7 @@ function winRun(){
 let last=performance.now();
 function frame(now){
   const dt=Math.min((now-last)/1000,0.05); last=now;
-  bgmUpdate(dt);
+  bgmUpdate(dt); stingerUpdate();
   if(IS_TOUCH&&scene==="play"&&isPortrait())scene="pause";
   let sdt=dt;
   if(G&&G.hitstop>0){G.hitstop-=dt;sdt=dt*0.06;}   // 히트스톱 (완전 정지 대신 초저속)
