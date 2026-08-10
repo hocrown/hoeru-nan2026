@@ -212,10 +212,24 @@ function drawMuteBtn(){
   ctx.globalAlpha=0.72;
   ctx.fillStyle=INK;ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,TAU);ctx.fill();
   ctx.globalAlpha=1;
-  ctx.fillStyle=PAPER;ctx.textAlign="center";ctx.textBaseline="middle";
-  ctx.font="15px 'Segoe UI Emoji','Apple Color Emoji',sans-serif";
-  ctx.fillText(AUD.muted?"🔇":"🔊",b.x,b.y+1);
-  ctx.textBaseline="alphabetic";
+  ctx.translate(b.x-1,b.y);
+  // 스피커 몸통 — 사각(넥) + 원뿔. 이모지 폰트 의존 없이 벡터로만 그린다.
+  ctx.fillStyle=PAPER;
+  ctx.beginPath();
+  ctx.moveTo(-8,-3);ctx.lineTo(-4.5,-3);ctx.lineTo(-0.5,-7.5);
+  ctx.lineTo(-0.5,7.5);ctx.lineTo(-4.5,3);ctx.lineTo(-8,3);
+  ctx.closePath();ctx.fill();
+  ctx.strokeStyle=PAPER;ctx.lineCap="round";
+  if(AUD.muted){        // 꺼짐 — X 두 선
+    ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(3,-4.5);ctx.lineTo(9.5,4);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(9.5,-4.5);ctx.lineTo(3,4);ctx.stroke();
+  }else{                // 켜짐 — 음파 호 2개
+    ctx.lineWidth=1.8;
+    ctx.beginPath();ctx.arc(0,0,5,-0.72,0.72);ctx.stroke();
+    ctx.beginPath();ctx.arc(0,0,8.6,-0.72,0.72);ctx.stroke();
+  }
+  ctx.lineCap="butt";ctx.lineWidth=1;
   ctx.restore();
 }
 
@@ -1026,7 +1040,7 @@ function drawPause(){          // 일시정지 — 조작 안내 재표시
       ["우하단 [경공]","회피 — 순간 무적"],
       ["그 위 [공명]","빙의 버스트 (게이지 100)"],
       ["두 번째 손가락 탭","경공"],
-      ["우상단 🔊","음소거"]]
+      ["우상단 스피커","음소거"]]
     :[["WASD / 방향키","이동"],
       ["Space","경공 — 회피, 저스트 시 공명 충전"],
       ["E","공명 — 빙의 버스트"],
