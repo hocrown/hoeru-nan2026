@@ -271,7 +271,9 @@ let scene="title";            // title | play | levelup | over | win | pause
 let regressions=0;            // 회귀 횟수 (사망 카운트)
 let G=null;                   // 런 상태
 
-const RUN_LEN=360, MINI_T=180, BOSS_T=330;
+const RUN_LEN=360, MINI_T=140, BOSS_T=330;
+// 보스급 "패기" — 공명 중 받는 피해 감소율. 공명 원킬 방지 (공명은 정예 정리용)
+const BOSS_RES_RESIST=0.6;
 const TIERS=["삼류","이류","일류","절정","초절정","화경"];
 const TIER_MUL=[1,1.18,1.4,1.66,1.96,2.32];
 
@@ -485,11 +487,11 @@ function spawnEnemy(kind){
 }
 function spawnMini(){
   SFX.boss(); shakeAdd(3);
-  G.enemies.push({k:"mini",x:W/2,y:-40,hp:650*hpScale(),hpMax:650*hpScale(),spd:52,r:24,dmg:20,cd:2.5,wob:0,lastHits:[],boss:true,name:"광검수(狂劍手)"});
+  G.enemies.push({k:"mini",x:W/2,y:-40,hp:1450*hpScale(),hpMax:1450*hpScale(),spd:52,r:24,dmg:20,cd:2.5,wob:0,lastHits:[],boss:true,name:"광검수(狂劍手)"});
 }
 function spawnBoss(){
   G.bossPhase=true; SFX.boss(); shakeAdd(3); G.dimT=0.5;
-  G.enemies.push({k:"boss",x:W/2,y:-60,hp:2400*hpScale(),hpMax:2400*hpScale(),spd:44,r:30,dmg:26,cd:3,pat:0,state:"walk",aim:0,vx:0,vy:0,wob:0,lastHits:[],boss:true,name:"타락한 대협"});
+  G.enemies.push({k:"boss",x:W/2,y:-60,hp:3000*hpScale(),hpMax:3000*hpScale(),spd:44,r:30,dmg:26,cd:3,pat:0,state:"walk",aim:0,vx:0,vy:0,wob:0,lastHits:[],boss:true,name:"타락한 대협"});
 }
 
 // ---------- 전투 유틸 ----------
@@ -503,8 +505,9 @@ function coopMul(e){
 }
 function hitEnemy(e,dmg,src){
   e.lastHits.push({t:G.t,src});
-  const d=dmg*coopMul(e);
-  e.hp-=d; e.flash=0.06;                    // 히트 플래시 (약 2프레임)
+  let d=dmg*coopMul(e);
+  if(e.boss&&G.resT>0)d*=BOSS_RES_RESIST;   // 패기 — 보스급은 공명 중 피해 감소
+  e.hp-=d; e.flash=0.06;                  // 히트 플래시 (약 2프레임)
   G.dmgTx.push({x:e.x+rnd(-6,6),y:e.y-e.r,v:Math.round(d),t:0});
   G.fx.push({type:"splash",x:e.x,y:e.y,t:0});
   SFX.hit();
@@ -726,6 +729,9 @@ function update(dt){
       if(t>70&&r<0.22)spawnEnemy("wraith");
       else if(t>130&&r<(t>180?0.36:0.30))spawnEnemy("ram");
       else spawnEnemy("grunt");}
+    if(t>220&&!G.eliteWave){G.eliteWave=true;   // 엘리트 혼합 웨이브 — 돌귀 4기 동시
+      for(let i=0;i<4;i++)spawnEnemy("ram");
+      G.fx.push({type:"elitewarn",t:0});SFX.bossAtk();}
     if(t>210&&!G.ring1){G.ring1=true;ringSpawn(14);}
     if(t>270&&!G.ring2){G.ring2=true;ringSpawn(18);}
     if(t>=MINI_T&&!G.miniSpawned){G.miniSpawned=true;spawnMini();}
@@ -842,7 +848,9 @@ function draw(){
       ctx.fillStyle=INK;ctx.fillRect(W/2-160,14,320,10);
       ctx.fillStyle=RED;ctx.fillRect(W/2-158,16,316*clamp(e.hp/e.hpMax,0,1),6);
       ctx.fillStyle=INK;ctx.font="12px serif";ctx.textAlign="center";
-      ctx.fillText(e.name,W/2,38);}
+      ctx.fillText(e.name,W/2,38);
+      if(G.resT>0){ctx.fillStyle=RED;ctx.font="11px serif";
+        ctx.fillText(`패기 — 공명 피해 ${Math.round((1-BOSS_RES_RESIST)*100)}% 감소`,W/2,53);}}
   }
   // 적탄
   ctx.fillStyle="#5a2420";
