@@ -139,12 +139,13 @@ function audioInit(){            // 최초 사용자 입력에서 1회 (autoplay
       AUD.master.connect(AUD.ctx.destination);
     }
   }catch(e){AUD.ctx=null;}
-  bgmInit();
+  bgmInit(); stingerInit();
 }
 function audioResume(){ if(AUD.ctx&&AUD.ctx.state==="suspended")AUD.ctx.resume().catch(()=>{}); }
 function toggleMute(){
   AUD.muted=!AUD.muted; lsSet("hoiru_mute",AUD.muted?"1":"0");
   if(AUD.master)AUD.master.gain.value=AUD.muted?0:MASTER_VOL;
+  if(AUD.muted)stingerStop();      // 재생 중이던 스팅어도 함께 멈춘다
 }
 function noiseBuf(){
   if(AUD.noise)return AUD.noise;
@@ -234,6 +235,37 @@ const SFX={
       type:"sine",dur:1.6,vol:0.11,atk:0.02,delay:d}));
     nz({type:"lowpass",fc:1600,fc2:250,dur:0.8,vol:0.06}); },
 };
+// --- 스팅어: assets/sfx_*.mp3 가 있으면 절차 SFX 대신 재생 (BGM 훅과 같은 패턴) ---
+// BGM 크로스페이드와 간섭하지 않도록 완전히 별도 Audio 인스턴스를 쓴다.
+const STINGER_VOL=0.5;
+const STINGER_NAMES=["sfx_boss","sfx_mini","sfx_summon","sfx_win","sfx_lose"];
+const STG={};
+function stingerInit(){
+  if(STG.__init)return; STG.__init=true;
+  for(const n of STINGER_NAMES){
+    try{
+      const a=new Audio(); a.preload="auto"; a.volume=STINGER_VOL; a.ok=false;
+      a.addEventListener("canplay",()=>{a.ok=true;});
+      a.addEventListener("error",()=>{a.ok=false;});
+      a.src="assets/"+n+".mp3";
+      STG[n]=a;
+    }catch(e){}
+  }
+}
+// 파일이 있으면 재생하고 true(=절차 SFX 생략), 없으면 false(=호출부가 절차 SFX로 폴백)
+function stinger(n){
+  const a=STG[n];
+  if(!a||!a.ok)return false;
+  if(!AUD.muted){                       // 음소거면 파일이 있어도 소리를 내지 않는다
+    try{ a.currentTime=0; const p=a.play(); if(p&&p.catch)p.catch(()=>{}); }
+    catch(e){}                          // 재생 실패(오토플레이 정책 등)는 조용히 무시
+  }
+  return true;
+}
+function stingerStop(){
+  for(const n of STINGER_NAMES){const a=STG[n];
+    if(a&&!a.paused){try{a.pause();a.currentTime=0;}catch(e){}}}
+}
 // --- BGM: 파일이 있으면 루프, 없으면 조용히 무시 ---
 function mkBgm(src){
   const a=new Audio(); a.loop=true; a.preload="auto"; a.volume=0; a.ok=false;
@@ -448,6 +480,7 @@ function rollOffers(){
   }
   G.offers=offers;
   if(offers.length===0){G.p.hp=Math.min(G.p.hpMax,G.p.hp+35);G.offers=null;return;}
+  stinger("sfx_summon");      // 파일 없으면 현행대로 무음
   scene="levelup";
 }
 function pick(i){
@@ -507,11 +540,13 @@ function spawnEnemy(kind){
   else if(kind==="ram")G.enemies.push({k:"ram",x,y,hp:110*s,hpMax:110*s,spd:46,r:17,dmg:24,state:"walk",aim:0,vx:0,vy:0,wob:rnd(0,TAU),lastHits:[]});
 }
 function spawnMini(){
-  SFX.boss(); shakeAdd(3);
+  if(!stinger("sfx_mini"))SFX.boss();
+  shakeAdd(3);
   G.enemies.push({k:"mini",x:W/2,y:-40,hp:1450*hpScale(),hpMax:1450*hpScale(),spd:52,r:24,dmg:20,cd:2.5,wob:0,lastHits:[],boss:true,name:"광검수(狂劍手)"});
 }
 function spawnBoss(){
-  G.bossPhase=true; SFX.boss(); shakeAdd(3); G.dimT=0.5;
+  G.bossPhase=true; if(!stinger("sfx_boss"))SFX.boss();
+  shakeAdd(3); G.dimT=0.5;
   G.enemies.push({k:"boss",x:W/2,y:-60,hp:3000*hpScale(),hpMax:3000*hpScale(),spd:44,r:30,dmg:26,cd:3,pat:0,state:"walk",aim:0,vx:0,vy:0,wob:0,lastHits:[],boss:true,name:"타락한 대협"});
 }
 
@@ -562,10 +597,10 @@ function hurtPlayer(dmg){
   if(p.inv>0)return;
   if(p.shield>0){p.shield=0;p.shieldCd=8;p.inv=0.6;G.fx.push({type:"shieldpop",x:p.x,y:p.y,t:0});return;}
   p.hp-=dmg; p.inv=0.7; p.flash=0.06; G.rank.hitTaken++; SFX.hurt();
-  if(p.hp<=0){regressions++;scene="over";SFX.over();}
+  if(p.hp<=0){regressions++;scene="over";if(!stinger("sfx_lose"))SFX.over();}
 }
 function winRun(){
-  scene="win"; SFX.win();
+  scene="win"; if(!stinger("sfx_win"))SFX.win();
 }
 
 // ---------- 업데이트 ----------
