@@ -1,0 +1,29 @@
+{
+  "kind": "sprite-gen-image-report",
+  "provider": "codex",
+  "prompt": "tiny pixel art game sprite, transparent-ready, facing right, east-asian ink-wash silhouette style, dark ink tones, single accent color, crisp readable silhouette, no outline glow, no text, flat solid magenta #FF00FF background filling the whole canvas. Subject: single floating straight sword pointing up, vertical composition, dark steel blue #3a4a58",
+  "out": "/mnt/d/12.개인프로젝트/31.진무영-NHN FEST/tools/raw_static/relic2.png",
+  "raw": "/mnt/d/12.개인프로젝트/31.진무영-NHN FEST/tools/raw_static/relic2.png.raw.png",
+  "raw_bytes": 1195071,
+  "elapsed_seconds": 59.646,
+  "model": null,
+  "session_id": "019feb71-2a99-7522-ba45-380e750ec358",
+  "refs": [],
+  "transparent": true,
+  "chroma": {
+    "out": "/mnt/d/12.개인프로젝트/31.진무영-NHN FEST/tools/raw_static/relic2.png",
+    "mode": "RGBA",
+    "size": "1024x1536",
+    "key": "magenta",
+    "keyed_pixels": 1470343,
+    "fringe_pixels": 0,
+    "cleaned_transparent_rgb_pixels": 0,
+    "alpha_zero_pct": 93.48,
+    "stale_transparent_rgb_pixels": 0
+  },
+  "extra": {
+    "inline_results": 1,
+    "rollout_cleaned": true
+  },
+  "provider_resolved_from": "explicit"
+}

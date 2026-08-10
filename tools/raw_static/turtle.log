@@ -1,0 +1,29 @@
+{
+  "kind": "sprite-gen-image-report",
+  "provider": "codex",
+  "prompt": "tiny pixel art game sprite, transparent-ready, facing right, east-asian ink-wash silhouette style, dark ink tones, single accent color, crisp readable silhouette, no outline glow, no text, flat solid magenta #FF00FF background filling the whole canvas. Subject: small stone spirit turtle, moss-dark shell #5d6155, walking",
+  "out": "/mnt/d/12.개인프로젝트/31.진무영-NHN FEST/tools/raw_static/turtle.png",
+  "raw": "/mnt/d/12.개인프로젝트/31.진무영-NHN FEST/tools/raw_static/turtle.png.raw.png",
+  "raw_bytes": 1047194,
+  "elapsed_seconds": 60.694,
+  "model": null,
+  "session_id": "019feb71-2a79-7ea0-836e-0948f1942b22",
+  "refs": [],
+  "transparent": true,
+  "chroma": {
+    "out": "/mnt/d/12.개인프로젝트/31.진무영-NHN FEST/tools/raw_static/turtle.png",
+    "mode": "RGBA",
+    "size": "1254x1254",
+    "key": "magenta",
+    "keyed_pixels": 1450413,
+    "fringe_pixels": 0,
+    "cleaned_transparent_rgb_pixels": 0,
+    "alpha_zero_pct": 92.24,
+    "stale_transparent_rgb_pixels": 0
+  },
+  "extra": {
+    "inline_results": 1,
+    "rollout_cleaned": true
+  },
+  "provider_resolved_from": "explicit"
+}

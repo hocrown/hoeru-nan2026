@@ -1,0 +1,29 @@
+{
+  "kind": "sprite-gen-image-report",
+  "provider": "codex",
+  "prompt": "tiny pixel art game sprite, transparent-ready, facing right, east-asian ink-wash silhouette style, dark ink tones, single accent color, crisp readable silhouette, no outline glow, no text, flat solid magenta #FF00FF background filling the whole canvas. Subject: spirit crane with spread wings, grey-blue #7a8a94, flying",
+  "out": "/mnt/d/12.개인프로젝트/31.진무영-NHN FEST/tools/raw_static/crane.png",
+  "raw": "/mnt/d/12.개인프로젝트/31.진무영-NHN FEST/tools/raw_static/crane.png.raw.png",
+  "raw_bytes": 1108040,
+  "elapsed_seconds": 60.95,
+  "model": null,
+  "session_id": "019feb71-2a60-7573-91a8-14d0193d963f",
+  "refs": [],
+  "transparent": true,
+  "chroma": {
+    "out": "/mnt/d/12.개인프로젝트/31.진무영-NHN FEST/tools/raw_static/crane.png",
+    "mode": "RGBA",
+    "size": "1254x1254",
+    "key": "magenta",
+    "keyed_pixels": 1324884,
+    "fringe_pixels": 0,
+    "cleaned_transparent_rgb_pixels": 0,
+    "alpha_zero_pct": 84.25,
+    "stale_transparent_rgb_pixels": 0
+  },
+  "extra": {
+    "inline_results": 1,
+    "rollout_cleaned": true
+  },
+  "provider_resolved_from": "explicit"
+}
