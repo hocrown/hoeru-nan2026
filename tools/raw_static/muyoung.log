@@ -1,0 +1,29 @@
+{
+  "kind": "sprite-gen-image-report",
+  "provider": "codex",
+  "prompt": "tiny pixel art game sprite, east-asian ink-wash wuxia style, crisp silhouette, no text, flat solid magenta #FF00FF background. Subject: mysterious wuxia swordsman seen from BEHIND, back turned, walking away into mist — long dark tattered robe with countless mended patches, single long jian sword at his side, long tied black hair, worn and weathered, almost entirely ink-black silhouette with faint pale robe edges, melancholic and ominous",
+  "out": "/mnt/d/12.개인프로젝트/31.진무영-NHN FEST/tools/raw_static/muyoung.png",
+  "raw": "/mnt/d/12.개인프로젝트/31.진무영-NHN FEST/tools/raw_static/muyoung.png.raw.png",
+  "raw_bytes": 1184169,
+  "elapsed_seconds": 79.068,
+  "model": null,
+  "session_id": "019fec0c-acae-7463-b688-493211a38971",
+  "refs": [],
+  "transparent": true,
+  "chroma": {
+    "out": "/mnt/d/12.개인프로젝트/31.진무영-NHN FEST/tools/raw_static/muyoung.png",
+    "mode": "RGBA",
+    "size": "1254x1254",
+    "key": "magenta",
+    "keyed_pixels": 1269907,
+    "fringe_pixels": 0,
+    "cleaned_transparent_rgb_pixels": 0,
+    "alpha_zero_pct": 80.76,
+    "stale_transparent_rgb_pixels": 0
+  },
+  "extra": {
+    "inline_results": 1,
+    "rollout_cleaned": true
+  },
+  "provider_resolved_from": "explicit"
+}
